@@ -22,7 +22,7 @@ export class LlamafileManager {
 
     this.process = spawn(
       "sh",
-      [this.config.binaryPath, "--server", "--port", String(this.config.port), "--no-webui"],
+      [this.config.binaryPath, "--server", "--port", String(this.config.port), "--no-webui", "--jinja"],
       { stdio: ["ignore", "pipe", "pipe"] }
     );
 

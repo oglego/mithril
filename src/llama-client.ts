@@ -49,3 +49,28 @@ export async function* chatStream(
     }
   }
 }
+
+export async function chatOnce(
+  messages: ChatMessage[],
+  config: LlamaClientConfig,
+  toolDefs?: ApiToolDefinition[]
+): Promise<ChatMessage> {
+  const response = await fetch(`${config.baseUrl}/v1/chat/completions`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: config.model,
+      messages,
+      ...(toolDefs ? { tools: toolDefs, tool_choice: "auto" } : {}),
+    }),
+  });
+
+  const data = await response.json();
+  const message = data.choices[0].message;
+
+  return {
+    role: "assistant",
+    content: message.content ?? "",
+    tool_calls: message.tool_calls,
+  };
+}

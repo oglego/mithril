@@ -1,6 +1,8 @@
 import * as readline from "node:readline/promises";
 import type { ChatMessage } from "./types.js";
-import { chatStream, type LlamaClientConfig } from "./llama-client.js";
+import type { LlamaClientConfig } from "./llama-client.js";
+import { runAgentTurn } from "./agent-loop.js";
+import { tools } from "./tools.js";
 
 export async function runRepl(config: LlamaClientConfig) {
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
@@ -13,17 +15,8 @@ export async function runRepl(config: LlamaClientConfig) {
     if (userInput.trim().toLowerCase() === "exit") break;
 
     history.push({ role: "user", content: userInput });
-
-    process.stdout.write("model> ");
-    let reply = "";
-
-    for await (const token of chatStream(history, config)) {
-      process.stdout.write(token);
-      reply += token;
-    }
-    console.log("\n");
-
-    history.push({ role: "assistant", content: reply });
+    const reply = await runAgentTurn(history, tools, config);
+    console.log("model>", reply, "\n");
   }
 
   rl.close();
