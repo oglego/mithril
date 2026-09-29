@@ -1,6 +1,19 @@
 import { runRepl } from "./repl.js";
+import { LlamafileManager } from "./llamafile-manager.js";
+import { selectAndPrepareModel } from "./onboarding.js";
 
-runRepl({
+const binaryPath = await selectAndPrepareModel();
+
+const llamafile = new LlamafileManager({ binaryPath, port: 8080 });
+
+process.on("SIGINT", () => {
+  llamafile.stop();
+  process.exit(0);
+});
+
+await llamafile.start();
+
+await runRepl({
   baseUrl: "http://localhost:8080",
-  model: "gemma-4-E2B-it-qat-UD-Q4_K_XL",
+  model: "", // llamafile serves whichever single model it was launched with
 });

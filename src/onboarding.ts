@@ -1,0 +1,49 @@
+import * as p from "@clack/prompts";
+import { existsSync, mkdirSync } from "node:fs";
+import path from "node:path";
+import { MODEL_CATALOG } from "./models.js";
+import { downloadFile } from "./downloader.js";
+
+const MODELS_DIR = path.join(process.cwd(), "models");
+
+export async function selectAndPrepareModel(): Promise<string> {
+  p.intro("Mithril — local model harness");
+
+  const choice = await p.select({
+    message: "Which model do you want to run?",
+    options: MODEL_CATALOG.map((m) => ({
+      value: m,
+      label: m.name,
+      hint: `${m.size} · ${m.license}`,
+    })),
+  });
+
+  // If the user hits Ctrl+C during the prompt, select() returns a special
+  // "cancel" symbol instead of throwing — isCancel() checks for that.
+  if (p.isCancel(choice)) {
+    p.cancel("Cancelled.");
+    process.exit(0);
+  }
+
+  if (!existsSync(MODELS_DIR)) mkdirSync(MODELS_DIR);
+
+  const destPath = path.join(MODELS_DIR, choice.filename);
+
+  if (existsSync(destPath)) {
+    p.log.info(`${choice.name} is already downloaded — skipping.`);
+    p.outro("Ready.");
+    return destPath;
+  }
+
+  const spin = p.spinner();
+  spin.start(`Downloading ${choice.name} (${choice.size})...`);
+
+  await downloadFile(choice.url, destPath, (percent) => {
+    spin.message(`Downloading ${choice.name}... ${percent}%`);
+  });
+
+  spin.stop(`${choice.name} downloaded.`);
+  p.outro("Ready.");
+
+  return destPath;
+}

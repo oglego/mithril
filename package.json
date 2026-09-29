@@ -2,6 +2,7 @@
   "name": "mithril",
   "version": "1.0.0",
   "main": "index.js",
+  "type": "module",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "dev": "tsx src/index.ts"
@@ -14,5 +15,8 @@
     "@types/node": "^26.6.3",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2"
+  },
+  "dependencies": {
+    "@clack/prompts": "^1.8.1"
   }
 }
