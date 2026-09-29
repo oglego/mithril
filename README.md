@@ -1,58 +1,91 @@
 # Mithril
 
-Mithril is a small TypeScript command-line chat client for a local llama server. It sends conversation history to an OpenAI-compatible `/v1/chat/completions` endpoint and prints streamed responses as they arrive.
+Mithril is a small TypeScript command-line app that downloads a local Llamafile model, starts it as a local OpenAI-compatible chat server, and then provides a REPL interface for chatting with that model.
+
+The app is designed for a local-first workflow: choose a model from a catalog, download it if it is not already present, launch the model server, and open a chat loop without needing a separate hosted AI service.
+
+## Features
+
+- Interactive model selection at startup
+- Automatic download of selected Llamafile models into a local `models/` directory
+- Launches the model with `--server --port 8080 --no-webui --jinja`
+- Polls the server health endpoint until it is ready
+- Sends chat requests to the OpenAI-compatible `/v1/chat/completions` endpoint
+- Streams responses back to the terminal
+- Includes a simple tool-calling loop with a local `read_file` tool
 
 ## Requirements
 
 - Node.js 18 or newer
 - npm
-- A local llama server exposing an OpenAI-compatible chat completions endpoint
+- Network access to download model files from Hugging Face
+- Enough disk space for the selected Llamafile model
 
 ## Setup
 
-Install the dependencies:
+Install dependencies:
 
 ```sh
 npm install
 ```
 
-Start the llama server and make sure it is listening at the URL configured in `src/index.ts`. The default configuration expects:
-
-- Base URL: `http://localhost:8080`
-- Model: `gemma-4-E2B-it-qat-UD-Q4_K_XL`
-
 ## Run
 
-Start the REPL with:
+Start the app:
 
 ```sh
 npm run dev
 ```
 
-Type a message at the `you>` prompt. Responses are streamed at the `model>` prompt. Type `exit` to quit.
+The first run will:
 
-## Configuration
+1. Prompt you to choose a model from the built-in catalog.
+2. Download that model into `./models` if it is not already present.
+3. Start the llamafile server locally on port `8080`.
+4. Open the REPL.
 
-Change the server URL or model in `src/index.ts`:
+At the `you>` prompt, type a message and press Enter. The model response will be printed at the `model>` prompt. Type `exit` to quit.
 
-```ts
-runRepl({
-  baseUrl: "http://localhost:8080",
-  model: "your-model-name",
-});
+## How it works
+
+The application flow is:
+
+- `src/index.ts`: app entry point
+- `src/onboarding.ts`: model selection and download workflow
+- `src/llamafile-manager.ts`: launches and manages the llamafile process
+- `src/repl.ts`: interactive chat loop
+- `src/llama-client.ts`: HTTP client for `/v1/chat/completions`
+- `src/agent-loop.ts`: handles assistant tool calls and tool-result feedback
+- `src/tools.ts`: exposes local tools to the model, including `read_file`
+- `src/models.ts`: catalog of downloadable model URLs and metadata
+
+## Local model directory
+
+Downloaded models are stored under:
+
+```text
+./models/
 ```
 
-The client sends requests to `${baseUrl}/v1/chat/completions` with streaming enabled.
+If a model file already exists there, Mithril skips the download step for that model.
 
-## Project Structure
+## API behavior
 
-- `src/index.ts` - application entry point and local server configuration
-- `src/repl.ts` - interactive command-line loop and conversation history
-- `src/llama-client.ts` - streaming HTTP client
-- `src/types.ts` - chat and streaming response types
+The client sends requests to:
 
-## Development
+```text
+http://localhost:8080/v1/chat/completions
+```
 
-TypeScript configuration is provided in `tsconfig.json`. The repository includes the generated `package-lock.json` for reproducible npm installs.
+The app currently expects an OpenAI-compatible server and uses streaming responses when available.
 
-The test script is currently a placeholder and does not run automated tests yet.
+## Project status
+
+- TypeScript configuration is present in `tsconfig.json`.
+- The project has no automated test suite yet.
+- The `npm test` script is still a placeholder and exits with an error by design.
+- This is a local prototype project rather than a hardened production application.
+
+## Development notes
+
+The repository includes a generated `package-lock.json`, which helps keep installs reproducible. A future improvement would be to add a real test runner and build validation for CI use.
