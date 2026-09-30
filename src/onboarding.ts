@@ -6,7 +6,12 @@ import { downloadFile } from "./downloader.js";
 
 const MODELS_DIR = path.join(process.cwd(), "models");
 
-export async function selectAndPrepareModel(): Promise<string> {
+export interface PreparedModel {
+  binaryPath: string;
+  modelId: string;
+}
+
+export async function selectAndPrepareModel(): Promise<PreparedModel> {
   p.intro("Mithril — local model harness");
 
   const choice = await p.select({
@@ -28,11 +33,14 @@ export async function selectAndPrepareModel(): Promise<string> {
   if (!existsSync(MODELS_DIR)) mkdirSync(MODELS_DIR);
 
   const destPath = path.join(MODELS_DIR, choice.filename);
+  // llamafile identifies its loaded model by this id in API responses;
+  // stripping the extension gives a reasonable, stable identifier to send.
+  const modelId = choice.filename.replace(/\.llamafile$/, "");
 
   if (existsSync(destPath)) {
     p.log.info(`${choice.name} is already downloaded — skipping.`);
     p.outro("Ready.");
-    return destPath;
+    return { binaryPath: destPath, modelId };
   }
 
   const spin = p.spinner();
@@ -45,5 +53,5 @@ export async function selectAndPrepareModel(): Promise<string> {
   spin.stop(`${choice.name} downloaded.`);
   p.outro("Ready.");
 
-  return destPath;
+  return { binaryPath: destPath, modelId };
 }

@@ -1,4 +1,4 @@
-import type { ChatMessage, StreamChunk } from "./types.js";
+import type { ChatMessage, StreamChunk, ApiToolDefinition } from "./types.js";
 
 // A config object instead of hardcoded strings — swapping models or
 // server URLs now happens in one place.
@@ -65,7 +65,17 @@ export async function chatOnce(
     }),
   });
 
+  if (!response.ok) {
+    const errorText = await response.text().catch(() => "");
+    throw new Error(`llama-server request failed (${response.status}): ${errorText}`);
+  }
+
   const data = await response.json();
+
+  if (!data?.choices?.length || !data.choices[0]?.message) {
+    throw new Error("llama-server returned an unexpected response shape (no choices/message).");
+  }
+
   const message = data.choices[0].message;
 
   return {

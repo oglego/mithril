@@ -2,7 +2,7 @@ import { runRepl } from "./repl.js";
 import { LlamafileManager } from "./llamafile-manager.js";
 import { selectAndPrepareModel } from "./onboarding.js";
 
-const binaryPath = await selectAndPrepareModel();
+const { binaryPath, modelId } = await selectAndPrepareModel();
 
 const llamafile = new LlamafileManager({ binaryPath, port: 8080 });
 
@@ -15,5 +15,5 @@ await llamafile.start();
 
 await runRepl({
   baseUrl: "http://localhost:8080",
-  model: "", // llamafile serves whichever single model it was launched with
+  model: modelId,
 });

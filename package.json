@@ -4,8 +4,9 @@
   "main": "index.js",
   "type": "module",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "dev": "tsx src/index.ts"
+    "test": "node --test",
+    "dev": "tsx src/index.ts",
+    "build": "tsc --noEmit"
   },
   "keywords": [],
   "author": "",

@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readFile, realpath } from "node:fs/promises";
 import path from "node:path";
 import type { Tool, ApiToolDefinition } from "./types.js";
 
@@ -14,16 +14,30 @@ export const readFileTool: Tool = {
   },
   execute: async (args) => {
     const relativePath = args.path as string;
+    const projectRoot = process.cwd();
+    const fullPath = path.resolve(projectRoot, relativePath);
 
-    // Basic safety rail: resolve the path and refuse anything that
-    // escapes the project directory (e.g. "../../../etc/passwd").
-    const fullPath = path.resolve(process.cwd(), relativePath);
-    if (!fullPath.startsWith(process.cwd())) {
+    // path.relative tells us how to walk from projectRoot to fullPath.
+    // If that walk starts with ".." (goes upward) or is absolute (a
+    // different drive on Windows), fullPath is outside projectRoot.
+    // This catches cases a plain startsWith() string check misses, e.g.
+    // "/project-evil" incorrectly starting with "/project".
+    const relative = path.relative(projectRoot, fullPath);
+    if (relative.startsWith("..") || path.isAbsolute(relative)) {
       return "Error: access outside the project directory is not allowed.";
     }
 
     try {
-      const contents = await readFile(fullPath, "utf-8");
+      // A symlink inside the project can still point outside it. realpath
+      // resolves any symlinks to their true target so we check the path
+      // that will actually be read, not just the one that was requested.
+      const realFullPath = await realpath(fullPath);
+      const realRoot = await realpath(projectRoot);
+      if (realFullPath !== realRoot && !realFullPath.startsWith(realRoot + path.sep)) {
+        return "Error: resolved path escapes the project directory.";
+      }
+
+      const contents = await readFile(realFullPath, "utf-8");
       return contents.slice(0, 4000); // cap size so we don't blow the model's context
     } catch (err) {
       return `Error reading file: ${(err as Error).message}`;

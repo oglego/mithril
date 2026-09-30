@@ -12,7 +12,12 @@ export async function runAgentTurn(
   const toolDefs = toolsToApiFormat(availableTools);
 
   for (let step = 0; step < MAX_STEPS; step++) {
-    const assistantMessage = await chatOnce(history, config, toolDefs);
+    let assistantMessage: ChatMessage;
+    try {
+      assistantMessage = await chatOnce(history, config, toolDefs);
+    } catch (err) {
+      return `Error talking to llama-server: ${(err as Error).message}`;
+    }
     history.push(assistantMessage);
 
     // No tool calls means the model gave a real answer — done.
