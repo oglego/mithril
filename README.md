@@ -13,6 +13,7 @@ The app is designed for a local-first workflow: choose a model from a catalog, d
 - Sends chat requests to the OpenAI-compatible `/v1/chat/completions` endpoint
 - Runs a tool-calling agent loop (non-streaming): the model can call local tools, see the results, and respond based on them
 - Includes a local `read_file` tool, sandboxed to the project directory
+- Optional RAG over a folder of markdown notes (`--docs <path>`): indexes the folder with a dedicated embedding model and exposes a `search_docs` tool the model can call on demand
 
 ## Requirements
 
@@ -48,6 +49,23 @@ At the `you>` prompt, type a message and press Enter. The model's response is pr
 
 Server logs from llamafile itself are written to `mithril.log`, not the terminal, to keep the chat output clean.
 
+### Chatting with your notes (RAG)
+
+Point Mithril at a folder of markdown files to let the model search them on demand:
+
+```sh
+npm run dev -- --docs ./notes
+```
+
+On first use with a given folder, Mithril will:
+
+1. Download a dedicated embedding model (`mxbai-embed-large-v1`, ~699 MB) into `./models`, if not already present.
+2. Launch it as a second local server, separate from your chat model.
+3. Chunk each markdown file by `##` heading and embed each chunk.
+4. Cache the result as `.mithril-index.json` inside the docs folder — on later runs, only new or edited files are re-embedded.
+
+The model doesn't see your notes automatically; it calls a `search_docs` tool only when it decides your question might be answered by them, and only the retrieved passages are added to the conversation.
+
 ## How it works
 
 - `src/index.ts` — app entry point; wires everything together
@@ -58,6 +76,11 @@ Server logs from llamafile itself are written to `mithril.log`, not the terminal
 - `src/llama-client.ts` — HTTP client for `/v1/chat/completions` (both streaming and non-streaming)
 - `src/agent-loop.ts` — runs the tool-calling loop: sends the conversation, executes any requested tools, feeds results back, repeats until a plain-text answer
 - `src/tools.ts` — local tools exposed to the model, including `read_file`
+- `src/embedding-model.ts` — the fixed embedding model used for RAG
+- `src/markdown-chunker.ts` — splits markdown files into retrievable chunks
+- `src/indexer.ts` — builds and caches the embedding index for a docs folder
+- `src/retriever.ts` — cosine similarity search over the index
+- `src/rag-tool.ts` — the `search_docs` tool, wired in only when `--docs` is passed
 - `src/repl.ts` — the interactive chat loop
 
 ## Local model directory

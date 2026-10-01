@@ -84,3 +84,26 @@ export async function chatOnce(
     tool_calls: message.tool_calls,
   };
 }
+
+// Calls an embedding-mode llamafile server's /v1/embeddings endpoint and
+// returns the embedding vector for a single piece of text.
+export async function embedOnce(text: string, config: LlamaClientConfig): Promise<number[]> {
+  const response = await fetch(`${config.baseUrl}/v1/embeddings`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ model: config.model, input: text }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text().catch(() => "");
+    throw new Error(`embedding request failed (${response.status}): ${errorText}`);
+  }
+
+  const data = await response.json();
+
+  if (!data?.data?.length || !data.data[0]?.embedding) {
+    throw new Error("embedding server returned an unexpected response shape.");
+  }
+
+  return data.data[0].embedding;
+}

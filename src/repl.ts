@@ -1,10 +1,9 @@
 import * as readline from "node:readline/promises";
-import type { ChatMessage } from "./types.js";
+import type { ChatMessage, Tool } from "./types.js";
 import type { LlamaClientConfig } from "./llama-client.js";
 import { runAgentTurn } from "./agent-loop.js";
-import { tools } from "./tools.js";
 
-export async function runRepl(config: LlamaClientConfig) {
+export async function runRepl(config: LlamaClientConfig, tools: Tool[]) {
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   const history: ChatMessage[] = [];
 

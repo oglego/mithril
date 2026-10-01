@@ -5,6 +5,12 @@ export interface LlamafileConfig {
   binaryPath: string;
   port: number;
   logPath?: string; // where to send llamafile's own logs
+  // Process-specific flags, e.g. ["--jinja", "--no-webui"]. Different
+  // llamafile binaries bundle different llama.cpp server versions and can
+  // accept different flag names (older builds use --nobrowser, newer ones
+  // --no-webui) — there is no flag safe to assume across every binary, so
+  // nothing is hardcoded here; each caller supplies exactly what its binary needs.
+  extraArgs?: string[];
 }
 
 export class LlamafileManager {
@@ -22,7 +28,13 @@ export class LlamafileManager {
 
     this.process = spawn(
       "sh",
-      [this.config.binaryPath, "--server", "--port", String(this.config.port), "--no-webui", "--jinja"],
+      [
+        this.config.binaryPath,
+        "--server",
+        "--port",
+        String(this.config.port),
+        ...(this.config.extraArgs ?? []),
+      ],
       { stdio: ["ignore", "pipe", "pipe"] }
     );
 

@@ -3,8 +3,7 @@ import { existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { MODEL_CATALOG } from "./models.js";
 import { downloadFile } from "./downloader.js";
-
-const MODELS_DIR = path.join(process.cwd(), "models");
+import { MODELS_DIR } from "./paths.js";
 
 export interface PreparedModel {
   binaryPath: string;
