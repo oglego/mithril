@@ -1,6 +1,6 @@
 import { readFile, realpath } from "node:fs/promises";
 import path from "node:path";
-import type { Tool, ApiToolDefinition } from "./types.js";
+import type { Tool, ApiToolDefinition } from "../types.js";
 
 export const readFileTool: Tool = {
   name: "read_file",

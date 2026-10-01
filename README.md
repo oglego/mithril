@@ -69,19 +69,13 @@ The model doesn't see your notes automatically; it calls a `search_docs` tool on
 ## How it works
 
 - `src/index.ts` — app entry point; wires everything together
-- `src/onboarding.ts` — model selection and download workflow
-- `src/models.ts` — catalog of downloadable model URLs and metadata
-- `src/downloader.ts` — streaming download with progress reporting and atomic writes
-- `src/llamafile-manager.ts` — launches and monitors the llamafile process
-- `src/llama-client.ts` — HTTP client for `/v1/chat/completions` (both streaming and non-streaming)
-- `src/agent-loop.ts` — runs the tool-calling loop: sends the conversation, executes any requested tools, feeds results back, repeats until a plain-text answer
-- `src/tools.ts` — local tools exposed to the model, including `read_file`
-- `src/embedding-model.ts` — the fixed embedding model used for RAG
-- `src/markdown-chunker.ts` — splits markdown files into retrievable chunks
-- `src/indexer.ts` — builds and caches the embedding index for a docs folder
-- `src/retriever.ts` — cosine similarity search over the index
-- `src/rag-tool.ts` — the `search_docs` tool, wired in only when `--docs` is passed
+- `src/types.ts` — shared types used across the project
 - `src/repl.ts` — the interactive chat loop
+- `src/client/llama-client.ts` — HTTP client for chat, streaming, and embeddings
+- `src/llamafile/manager.ts` — launches and monitors a llamafile process
+- `src/models/` — model acquisition: `catalog.ts` (chat model list), `embedding-model.ts`, `downloader.ts`, `onboarding.ts` (picker flow), `paths.ts`
+- `src/agent/` — `agent-loop.ts` (tool-calling loop), `tools.ts` (local tools, including `read_file`)
+- `src/rag/` — `chunker.ts`, `indexer.ts`, `retriever.ts`, `rag-tool.ts` (the `search_docs` tool, wired in only when `--docs` is passed)
 
 ## Local model directory
 
@@ -101,7 +95,7 @@ The client sends requests to:
 http://localhost:8080/v1/chat/completions
 ```
 
-The REPL currently uses non-streaming requests, since tool-calling responses are validated and parsed as a whole before deciding whether to run a tool or show an answer. A separate streaming code path (`chatStream` in `src/llama-client.ts`) exists and is used for straightforward chat, but isn't yet wired into the tool-calling loop.
+The REPL currently uses non-streaming requests, since tool-calling responses are validated and parsed as a whole before deciding whether to run a tool or show an answer. A separate streaming code path (`chatStream` in `src/client/llama-client.ts`) exists and is used for straightforward chat, but isn't yet wired into the tool-calling loop.
 
 ## Project status
 

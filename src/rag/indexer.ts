@@ -1,7 +1,7 @@
 import { readdir, readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { chunkMarkdown } from "./markdown-chunker.js";
-import { embedOnce, type LlamaClientConfig } from "./llama-client.js";
+import { chunkMarkdown } from "./chunker.js";
+import { embedOnce, type LlamaClientConfig } from "../client/llama-client.js";
 
 export interface IndexedChunk {
   filePath: string;

@@ -1,7 +1,7 @@
 import * as readline from "node:readline/promises";
 import type { ChatMessage, Tool } from "./types.js";
-import type { LlamaClientConfig } from "./llama-client.js";
-import { runAgentTurn } from "./agent-loop.js";
+import type { LlamaClientConfig } from "./client/llama-client.js";
+import { runAgentTurn } from "./agent/agent-loop.js";
 
 export async function runRepl(config: LlamaClientConfig, tools: Tool[]) {
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });

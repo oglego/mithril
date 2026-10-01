@@ -1,5 +1,5 @@
-import type { ChatMessage, Tool } from "./types.js";
-import { chatOnce, type LlamaClientConfig } from "./llama-client.js";
+import type { ChatMessage, Tool } from "../types.js";
+import { chatOnce, type LlamaClientConfig } from "../client/llama-client.js";
 import { toolsToApiFormat } from "./tools.js";
 
 const MAX_STEPS = 5; // safety cap: stops a confused model from looping forever

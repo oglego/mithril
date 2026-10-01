@@ -1,4 +1,4 @@
-import type { ChatMessage, StreamChunk, ApiToolDefinition } from "./types.js";
+import type { ChatMessage, StreamChunk, ApiToolDefinition } from "../types.js";
 
 // A config object instead of hardcoded strings — swapping models or
 // server URLs now happens in one place.

@@ -2,14 +2,14 @@ import path from "node:path";
 import { existsSync, mkdirSync } from "node:fs";
 import * as p from "@clack/prompts";
 import { runRepl } from "./repl.js";
-import { LlamafileManager } from "./llamafile-manager.js";
-import { selectAndPrepareModel } from "./onboarding.js";
-import { MODELS_DIR } from "./paths.js";
-import { EMBEDDING_MODEL } from "./embedding-model.js";
-import { downloadFile } from "./downloader.js";
-import { buildIndex } from "./indexer.js";
-import { createSearchDocsTool } from "./rag-tool.js";
-import { tools as baseTools } from "./tools.js";
+import { LlamafileManager } from "./llamafile/manager.js";
+import { selectAndPrepareModel } from "./models/onboarding.js";
+import { MODELS_DIR } from "./models/paths.js";
+import { EMBEDDING_MODEL } from "./models/embedding-model.js";
+import { downloadFile } from "./models/downloader.js";
+import { buildIndex } from "./rag/indexer.js";
+import { createSearchDocsTool } from "./rag/rag-tool.js";
+import { tools as baseTools } from "./agent/tools.js";
 import type { Tool } from "./types.js";
 
 // Looks for `--docs <path>` in the CLI args. Kept as manual parsing rather

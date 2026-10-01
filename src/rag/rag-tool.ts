@@ -1,8 +1,8 @@
 import path from "node:path";
-import type { Tool } from "./types.js";
+import type { Tool } from "../types.js";
 import type { IndexedChunk } from "./indexer.js";
 import { retrieveTopK } from "./retriever.js";
-import { embedOnce, type LlamaClientConfig } from "./llama-client.js";
+import { embedOnce, type LlamaClientConfig } from "../client/llama-client.js";
 
 // A factory rather than a static export like tools.ts's readFileTool,
 // because search_docs needs to close over the index and embedding config —
