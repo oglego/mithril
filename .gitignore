@@ -6,3 +6,13 @@ coverage/
 .env
 .env.*
 .DS_Store
+
+# Downloaded llamafile binaries (multi-GB) — never belong in version control
+models/
+
+# Process logs from LlamafileManager
+*.log
+
+# RAG index cache — contains chunked content from the user's --docs folder,
+# not just embedding vectors, so this can leak note content if committed
+.mithril-index.json

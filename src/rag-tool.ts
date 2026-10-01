@@ -24,7 +24,11 @@ export function createSearchDocsTool(
       required: ["query"],
     },
     execute: async (args) => {
-      const query = args.query as string;
+      const query = args.query;
+
+      if (typeof query !== "string" || query.length === 0) {
+        return 'Error: missing or invalid "query" argument.';
+      }
 
       if (index.length === 0) {
         return "No indexed documents are available.";

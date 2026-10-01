@@ -20,65 +20,88 @@ function parseDocsFlag(argv: string[]): string | undefined {
   return value ? path.resolve(value) : undefined;
 }
 
-const { binaryPath, modelId } = await selectAndPrepareModel();
+// Every LlamafileManager we start needs to be stopped if anything goes
+// wrong, not just on Ctrl+C — a failed download, a broken index build, or
+// the embedding server dying mid-startup would otherwise leave an already-
+// running process orphaned, since Node doesn't kill child processes just
+// because the parent exits or throws.
+const managers: LlamafileManager[] = [];
 
-const llamafile = new LlamafileManager({
-  binaryPath,
-  port: 8080,
-  extraArgs: ["--jinja", "--no-webui"], // this catalog's binaries are new enough for --no-webui
-  logPath: "./mithril.log",
-});
-
-// Every LlamafileManager we start needs to be stopped on exit — collected
-// here so --docs (which starts a second process) doesn't need its own
-// separate SIGINT handling.
-const managers: LlamafileManager[] = [llamafile];
+function stopAll(): void {
+  for (const manager of managers) manager.stop();
+}
 
 process.on("SIGINT", () => {
-  for (const manager of managers) manager.stop();
+  stopAll();
   process.exit(0);
 });
 
-await llamafile.start();
+process.on("uncaughtException", (err) => {
+  console.error(`Mithril hit an unexpected error: ${err.message}`);
+  stopAll();
+  process.exit(1);
+});
 
-let tools: Tool[] = baseTools;
+try {
+  const { binaryPath, modelId } = await selectAndPrepareModel();
 
-const docsDir = parseDocsFlag(process.argv.slice(2));
+  const llamafile = new LlamafileManager({
+    binaryPath,
+    port: 8080,
+    extraArgs: ["--jinja", "--no-webui"], // this catalog's binaries are new enough for --no-webui
+    logPath: "./mithril.log",
+    name: "chat model",
+  });
 
-if (docsDir) {
-  if (!existsSync(MODELS_DIR)) mkdirSync(MODELS_DIR);
+  // Pushed before start() so a failed start() still gets cleaned up by catch.
+  managers.push(llamafile);
+  await llamafile.start();
 
-  const embeddingBinaryPath = path.join(MODELS_DIR, EMBEDDING_MODEL.filename);
+  let tools: Tool[] = baseTools;
 
-  if (!existsSync(embeddingBinaryPath)) {
-    const spin = p.spinner();
-    spin.start(`Downloading embedding model (${EMBEDDING_MODEL.size})...`);
-    await downloadFile(EMBEDDING_MODEL.url, embeddingBinaryPath, (percent) => {
-      spin.message(`Downloading embedding model... ${percent}%`);
+  const docsDir = parseDocsFlag(process.argv.slice(2));
+
+  if (docsDir) {
+    if (!existsSync(MODELS_DIR)) mkdirSync(MODELS_DIR);
+
+    const embeddingBinaryPath = path.join(MODELS_DIR, EMBEDDING_MODEL.filename);
+
+    if (!existsSync(embeddingBinaryPath)) {
+      const spin = p.spinner();
+      spin.start(`Downloading embedding model (${EMBEDDING_MODEL.size})...`);
+      await downloadFile(EMBEDDING_MODEL.url, embeddingBinaryPath, (percent) => {
+        spin.message(`Downloading embedding model... ${percent}%`);
+      });
+      spin.stop("Embedding model downloaded.");
+    }
+
+    const embeddingManager = new LlamafileManager({
+      binaryPath: embeddingBinaryPath,
+      port: 8081,
+      // This specific model file was built against an older llamafile release
+      // that predates the --nobrowser -> --no-webui rename, so it needs the
+      // older flag name. If Mozilla ships a newer build of this model later,
+      // this may need to flip to --no-webui — check with --help if launch fails.
+      extraArgs: ["--embedding", "--nobrowser"],
+      logPath: "./mithril-embedding.log",
+      name: "embedding model",
     });
-    spin.stop("Embedding model downloaded.");
+
+    managers.push(embeddingManager);
+    await embeddingManager.start();
+
+    const embeddingConfig = { baseUrl: "http://localhost:8081", model: EMBEDDING_MODEL.filename };
+
+    p.log.info(`Indexing markdown files in ${docsDir}...`);
+    const index = await buildIndex(docsDir, embeddingConfig, (message) => p.log.info(message));
+    p.log.info(`Indexed ${index.length} chunk(s) from ${docsDir}.`);
+
+    tools = [...baseTools, createSearchDocsTool(index, docsDir, embeddingConfig)];
   }
 
-  const embeddingManager = new LlamafileManager({
-    binaryPath: embeddingBinaryPath,
-    port: 8081,
-    // This specific model file was built against an older llamafile release
-    // that predates the --nobrowser -> --no-webui rename, so it needs the
-    // older flag name. If Mozilla ships a newer build of this model later,
-    // this may need to flip to --no-webui — check with --help if launch fails.
-    extraArgs: ["--embedding", "--nobrowser"],
-    logPath: "./mithril-embedding.log",
-  });
-  managers.push(embeddingManager);
-  await embeddingManager.start();
-
-  const embeddingConfig = { baseUrl: "http://localhost:8081", model: EMBEDDING_MODEL.filename };
-
-  p.log.info(`Indexing markdown files in ${docsDir}...`);
-  const index = await buildIndex(docsDir, embeddingConfig, (message) => p.log.info(message));
-  p.log.info(`Indexed ${index.length} chunk(s) from ${docsDir}.`);
-
-  tools = [...baseTools, createSearchDocsTool(index, docsDir, embeddingConfig)];
+  await runRepl({ baseUrl: "http://localhost:8080", model: modelId }, tools);
+} catch (err) {
+  console.error(`Mithril failed to start: ${(err as Error).message}`);
+  stopAll();
+  process.exit(1);
 }
-
-await runRepl({ baseUrl: "http://localhost:8080", model: modelId }, tools);

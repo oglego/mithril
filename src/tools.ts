@@ -13,7 +13,17 @@ export const readFileTool: Tool = {
     required: ["path"],
   },
   execute: async (args) => {
-    const relativePath = args.path as string;
+    const relativePath = args.path;
+
+    // Small local models are more prone than frontier models to producing
+    // malformed or incomplete tool-call arguments, despite the schema above
+    // saying `path` is required. Validating here turns that into a clear
+    // message the model can see and retry from, rather than a confusing
+    // crash or downstream failure a few calls later.
+    if (typeof relativePath !== "string" || relativePath.length === 0) {
+      return 'Error: missing or invalid "path" argument.';
+    }
+
     const projectRoot = process.cwd();
     const fullPath = path.resolve(projectRoot, relativePath);
 
