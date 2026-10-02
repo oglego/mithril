@@ -7,7 +7,7 @@
     "node": ">=20.12.0"
   },
   "scripts": {
-    "test": "node --test",
+    "test": "node --import tsx --test src/rag/chunker.test.ts src/rag/retriever.test.ts src/agent/tools.test.ts",
     "dev": "tsx src/index.ts",
     "build": "tsc --noEmit"
   },

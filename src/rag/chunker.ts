@@ -6,7 +6,7 @@ export interface Chunk {
 // Sections longer than this get further split into fixed-size pieces, so
 // one huge heading-less section doesn't become one unfocused chunk that's
 // expensive to embed and vague to retrieve.
-const MAX_CHUNK_CHARS = 2000;
+export const MAX_CHUNK_CHARS = 2000;
 
 // Splits markdown text into chunks along "## " heading boundaries — a
 // natural, human-authored structure that usually lines up with distinct
