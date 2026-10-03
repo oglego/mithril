@@ -46,7 +46,7 @@ process.on("uncaughtException", (err) => {
 });
 
 console.log(BANNER);
-p.intro("light enough to run anywhere, strong enough to trust with your files.");
+p.intro("------------------------------------------------------------");
 
 try {
   const { binaryPath, modelId } = await selectAndPrepareModel();
