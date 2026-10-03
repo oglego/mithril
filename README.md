@@ -6,7 +6,7 @@ The app is designed for a local-first workflow: choose a model from a catalog, d
 
 ## Features
 
-- Interactive model selection at startup (`@clack/prompts`)
+- ASCII-art banner on launch, followed by interactive model selection (`@clack/prompts`)
 - Automatic download of selected llamafile models into a local `models/` directory, with atomic writes so an interrupted download can't be mistaken for a complete one
 - Launches the model with `--server --port 8080 --no-webui --jinja`
 - Polls the server health endpoint until it is ready
@@ -45,7 +45,7 @@ The first run will:
 3. Start the llamafile server locally on port `8080`.
 4. Open the REPL.
 
-At the `you>` prompt, type a message and press Enter. The model's response is printed at the `model>` prompt — if the model calls a tool (e.g. `read_file`) along the way, that happens automatically before the final answer is shown. Type `exit` to quit.
+Type a message and press Enter. A spinner shows while the model is thinking, updating to show tool activity (e.g. "Calling search_docs...") if the model uses one along the way. The reply appears in a bordered panel once ready. Type `exit` or press Ctrl+C to quit.
 
 Server logs from llamafile itself are written to `mithril.log`, not the terminal, to keep the chat output clean.
 

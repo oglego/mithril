@@ -7,7 +7,8 @@ const MAX_STEPS = 5; // safety cap: stops a confused model from looping forever
 export async function runAgentTurn(
   history: ChatMessage[],
   availableTools: Tool[],
-  config: LlamaClientConfig
+  config: LlamaClientConfig,
+  onToolCall?: (toolName: string) => void
 ): Promise<string> {
   const toolDefs = toolsToApiFormat(availableTools);
 
@@ -33,6 +34,7 @@ export async function runAgentTurn(
       if (!tool) {
         result = `Error: unknown tool "${call.function.name}"`;
       } else {
+        onToolCall?.(tool.name);
         try {
           // Some llama.cpp builds send arguments as a JSON string (the
           // OpenAI-standard format); others have shipped it as an already-

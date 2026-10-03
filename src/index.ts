@@ -10,6 +10,7 @@ import { downloadFile } from "./models/downloader.js";
 import { buildIndex } from "./rag/indexer.js";
 import { createSearchDocsTool } from "./rag/rag-tool.js";
 import { tools as baseTools } from "./agent/tools.js";
+import { BANNER } from "./banner.js";
 import type { Tool } from "./types.js";
 
 // Looks for `--docs <path>` in the CLI args. Kept as manual parsing rather
@@ -20,11 +21,13 @@ function parseDocsFlag(argv: string[]): string | undefined {
   return value ? path.resolve(value) : undefined;
 }
 
-// Every LlamafileManager we start needs to be stopped if anything goes
-// wrong, not just on Ctrl+C — a failed download, a broken index build, or
-// the embedding server dying mid-startup would otherwise leave an already-
-// running process orphaned, since Node doesn't kill child processes just
-// because the parent exits or throws.
+// Every LlamafileManager we start needs to be stopped no matter how the app
+// ends — a failed download, a crash mid-startup, a normal "exit", or a
+// Ctrl+C inside the chat prompt should all lead here. Node doesn't kill
+// spawned child processes just because the parent exits, throws, or a
+// clack prompt intercepts Ctrl+C before it becomes a process signal — so
+// every exit path below calls this explicitly, rather than relying on any
+// one of them to catch every case.
 const managers: LlamafileManager[] = [];
 
 function stopAll(): void {
@@ -42,6 +45,9 @@ process.on("uncaughtException", (err) => {
   process.exit(1);
 });
 
+console.log(BANNER);
+p.intro("light enough to run anywhere, strong enough to trust with your files.");
+
 try {
   const { binaryPath, modelId } = await selectAndPrepareModel();
 
@@ -51,6 +57,7 @@ try {
     extraArgs: ["--jinja", "--no-webui"], // this catalog's binaries are new enough for --no-webui
     logPath: "./mithril.log",
     name: "chat model",
+    onStatus: (message) => p.log.step(message),
   });
 
   // Pushed before start() so a failed start() still gets cleaned up by catch.
@@ -85,6 +92,7 @@ try {
       extraArgs: ["--embedding", "--nobrowser"],
       logPath: "./mithril-embedding.log",
       name: "embedding model",
+      onStatus: (message) => p.log.step(message),
     });
 
     managers.push(embeddingManager);
@@ -100,6 +108,11 @@ try {
   }
 
   await runRepl({ baseUrl: "http://localhost:8080", model: modelId }, tools);
+
+  // Normal exit path (typed "exit", or Ctrl+C inside the chat prompt, which
+  // clack intercepts as a cancel rather than a process-level SIGINT).
+  stopAll();
+  process.exit(0);
 } catch (err) {
   console.error(`Mithril failed to start: ${(err as Error).message}`);
   stopAll();

@@ -16,6 +16,11 @@ export interface LlamafileConfig {
   // so when two LlamafileManager instances run side by side you can tell
   // their console output apart.
   name?: string;
+  // Called with human-readable status updates ("Starting...", "ready.",
+  // etc). This module stays UI-agnostic — it doesn't know about clack or
+  // any particular styling — and just hands status strings to whatever the
+  // caller wants to do with them. Defaults to plain console.log.
+  onStatus?: (message: string) => void;
 }
 
 // Checks whether a port is free by actually trying to briefly bind to it.
@@ -44,6 +49,10 @@ export class LlamafileManager {
     return this.config.name ?? "llamafile";
   }
 
+  private status(message: string): void {
+    (this.config.onStatus ?? console.log)(message);
+  }
+
   async start(): Promise<void> {
     const port = this.config.port;
 
@@ -58,7 +67,7 @@ export class LlamafileManager {
       );
     }
 
-    console.log(`Starting ${this.label} from ${this.config.binaryPath}...`);
+    this.status(`Starting ${this.label} from ${this.config.binaryPath}...`);
 
     const logPath = this.config.logPath ?? "./mithril.log";
     this.logStream = createWriteStream(logPath, { flags: "a" });
@@ -79,13 +88,13 @@ export class LlamafileManager {
     this.process.stderr?.pipe(this.logStream);
 
     this.process.on("exit", (code) => {
-      console.log(`${this.label} exited with code ${code}`);
+      this.status(`${this.label} exited with code ${code}`);
       this.lastExitCode = code;
       this.process = null;
     });
 
     await this.waitUntilReady();
-    console.log(`(${this.label} logs are being written to ${logPath})`);
+    this.status(`(${this.label} logs are being written to ${logPath})`);
   }
 
   private async waitUntilReady(): Promise<void> {
@@ -106,7 +115,7 @@ export class LlamafileManager {
       try {
         const response = await fetch(`http://localhost:${this.config.port}/health`);
         if (response.ok) {
-          console.log(`${this.label} is ready.`);
+          this.status(`${this.label} is ready.`);
           return;
         }
       } catch {
