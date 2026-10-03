@@ -16,7 +16,9 @@ function cosineSimilarity(a: number[], b: number[]): number {
     normB += bi * bi;
   }
 
-  return dot / (Math.sqrt(normA) * Math.sqrt(normB));
+  const denom = Math.sqrt(normA) * Math.sqrt(normB);
+  if (denom === 0) return 0;
+  return dot / denom;
 }
 
 // Scores every chunk against the query and returns the top K. A brute-force

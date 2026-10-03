@@ -48,6 +48,18 @@ export async function* chatStream(
       if (token) yield token;
     }
   }
+
+  // Process any remaining data left in the buffer after the stream ends.
+  // If the server's last SSE line isn't newline-terminated, it would
+  // otherwise be silently dropped.
+  if (buffer.startsWith("data: ")) {
+    const payload = buffer.slice(6).trim();
+    if (payload !== "[DONE]") {
+      const chunk: StreamChunk = JSON.parse(payload);
+      const token = chunk.choices[0]?.delta?.content;
+      if (token) yield token;
+    }
+  }
 }
 
 export async function chatOnce(
@@ -70,7 +82,16 @@ export async function chatOnce(
     throw new Error(`llama-server request failed (${response.status}): ${errorText}`);
   }
 
-  const data = await response.json();
+  interface ChatCompletionResponse {
+    choices?: {
+      message?: {
+        content?: string;
+        tool_calls?: ChatMessage["tool_calls"];
+      };
+    }[];
+  }
+
+  const data: ChatCompletionResponse = await response.json();
 
   if (!data?.choices?.length || !data.choices[0]?.message) {
     throw new Error("llama-server returned an unexpected response shape (no choices/message).");
@@ -81,7 +102,7 @@ export async function chatOnce(
   return {
     role: "assistant",
     content: message.content ?? "",
-    tool_calls: message.tool_calls,
+    ...(message.tool_calls ? { tool_calls: message.tool_calls } : {}),
   };
 }
 
@@ -99,7 +120,13 @@ export async function embedOnce(text: string, config: LlamaClientConfig): Promis
     throw new Error(`embedding request failed (${response.status}): ${errorText}`);
   }
 
-  const data = await response.json();
+  interface EmbeddingResponse {
+    data?: {
+      embedding?: number[];
+    }[];
+  }
+
+  const data: EmbeddingResponse = await response.json();
 
   if (!data?.data?.length || !data.data[0]?.embedding) {
     throw new Error("embedding server returned an unexpected response shape.");

@@ -17,7 +17,7 @@ The app is designed for a local-first workflow: choose a model from a catalog, d
 
 ## Requirements
 
-- Node.js 18 or newer
+- Node.js 20.12 or newer
 - npm
 - Network access to download model files from Hugging Face
 - Enough disk space for the selected llamafile model
