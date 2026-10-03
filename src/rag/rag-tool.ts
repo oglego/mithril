@@ -34,8 +34,16 @@ export function createSearchDocsTool(
         return "No indexed documents are available.";
       }
 
-      const queryEmbedding = await embedOnce(query, embeddingConfig);
+      const prompt = embeddingConfig.queryPrefix
+        ? `${embeddingConfig.queryPrefix}${query}`
+        : query;
+
+      const queryEmbedding = await embedOnce(prompt, embeddingConfig);
       const results = retrieveTopK(queryEmbedding, index, 4);
+
+      if (results.length === 0) {
+        return `No relevant passages found for "${query}".`;
+      }
 
       return results
         .map((r) => `# ${path.relative(docsDir, r.filePath)} — ${r.heading}\n${r.content}`)
@@ -43,3 +51,4 @@ export function createSearchDocsTool(
     },
   };
 }
+

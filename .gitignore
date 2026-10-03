@@ -8,7 +8,7 @@ coverage/
 .DS_Store
 
 # Downloaded llamafile binaries (multi-GB) — never belong in version control
-models/
+/models/
 
 # Process logs from LlamafileManager
 *.log

@@ -98,7 +98,11 @@ try {
     managers.push(embeddingManager);
     await embeddingManager.start();
 
-    const embeddingConfig = { baseUrl: "http://localhost:8081", model: EMBEDDING_MODEL.filename };
+    const embeddingConfig = {
+      baseUrl: "http://localhost:8081",
+      model: EMBEDDING_MODEL.filename,
+      queryPrefix: EMBEDDING_MODEL.queryPrefix,
+    };
 
     p.log.info(`Indexing markdown files in ${docsDir}...`);
     const index = await buildIndex(docsDir, embeddingConfig, (message) => p.log.info(message));

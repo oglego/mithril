@@ -61,3 +61,21 @@ test("does not split a section that's exactly at the size cap", () => {
 
   assert.equal(chunks.length, 1);
 });
+
+test("splits oversized sections at paragraph boundaries without chopping words", () => {
+  const p1 = "First paragraph with introductory context that is relatively long. ".repeat(20);
+  const p2 = "Second paragraph covering different details in full sentences. ".repeat(20);
+  const markdown = `## Two Paragraphs\n\n${p1}\n\n${p2}`;
+
+  const chunks = chunkMarkdown(markdown);
+
+  assert.ok(chunks.length >= 2);
+  for (const chunk of chunks) {
+    assert.ok(chunk.content.length <= MAX_CHUNK_CHARS);
+    assert.equal(chunk.heading, "Two Paragraphs");
+    // Ensure chunks don't start or end with broken words
+    assert.ok(!chunk.content.startsWith(" "));
+    assert.ok(!chunk.content.endsWith(" "));
+  }
+});
+

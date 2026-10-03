@@ -5,7 +5,9 @@ import type { ChatMessage, StreamChunk, ApiToolDefinition } from "../types.js";
 export interface LlamaClientConfig {
   baseUrl: string;
   model: string;
+  queryPrefix?: string;
 }
+
 
 export async function* chatStream(
   messages: ChatMessage[],
@@ -133,4 +135,60 @@ export async function embedOnce(text: string, config: LlamaClientConfig): Promis
   }
 
   return data.data[0].embedding;
+}
+
+// Calls an embedding-mode server's /v1/embeddings endpoint for a batch of
+// texts. If the server supports array input (OpenAI-compatible batch embedding),
+// all vectors are returned in a single request. If the server rejects array input
+// (such as older llamafile builds), it gracefully falls back to bounded concurrent
+// single-text embedding requests.
+export async function embedBatch(
+  texts: string[],
+  config: LlamaClientConfig,
+  concurrency = 4
+): Promise<number[][]> {
+  if (texts.length === 0) return [];
+  if (texts.length === 1) return [await embedOnce(texts[0]!, config)];
+
+  try {
+    const response = await fetch(`${config.baseUrl}/v1/embeddings`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model: config.model, input: texts }),
+    });
+
+    if (response.ok) {
+      interface BatchEmbeddingResponse {
+        data?: {
+          index?: number;
+          embedding?: number[];
+        }[];
+      }
+
+      const data: BatchEmbeddingResponse = await response.json();
+      if (data?.data?.length === texts.length) {
+        // Sort by returned index if present, ensuring original order
+        const sorted = [...data.data].sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
+        if (sorted.every((item) => Array.isArray(item.embedding))) {
+          return sorted.map((item) => item.embedding!);
+        }
+      }
+    }
+  } catch {
+    // Server threw or network issue during batch request; proceed to fallback
+  }
+
+  // Graceful fallback: run concurrent embedOnce requests in chunks of `concurrency`
+  const results: number[][] = new Array(texts.length);
+  for (let i = 0; i < texts.length; i += concurrency) {
+    const slice = texts.slice(i, i + concurrency);
+    const chunkEmbeddings = await Promise.all(
+      slice.map((text) => embedOnce(text, config))
+    );
+    for (let j = 0; j < chunkEmbeddings.length; j++) {
+      results[i + j] = chunkEmbeddings[j]!;
+    }
+  }
+
+  return results;
 }

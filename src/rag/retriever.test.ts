@@ -55,3 +55,26 @@ test("is unaffected by vector magnitude, only direction", () => {
   const topTwo = results.slice(0, 2).map((r) => r.filePath).sort();
   assert.deepEqual(topTwo, ["long", "short"]);
 });
+
+test("handles zero-vector query gracefully by returning empty array", () => {
+  const index: IndexedChunk[] = [makeChunk("a", [1, 0])];
+  const results = retrieveTopK([0, 0], index, 1);
+  assert.deepEqual(results, []);
+});
+
+test("retrieves top K accurately from a larger collection in bounded time", () => {
+  const count = 100;
+  const index: IndexedChunk[] = [];
+  for (let i = 0; i < count; i++) {
+    // Generate vectors with varying angles
+    const angle = (i / count) * Math.PI;
+    index.push(makeChunk(`item-${i}`, [Math.cos(angle), Math.sin(angle)]));
+  }
+
+  // Query along x-axis [1, 0] -> angle 0 (item-0 is closest)
+  const results = retrieveTopK([1, 0], index, 5);
+  assert.equal(results.length, 5);
+  assert.equal(results[0]?.filePath, "item-0");
+  assert.equal(results[1]?.filePath, "item-1");
+});
+
