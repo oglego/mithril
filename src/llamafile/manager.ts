@@ -84,6 +84,11 @@ export class LlamafileManager {
       { stdio: ["ignore", "pipe", "pipe"] }
     );
 
+    this.process.once("error", (error) => {
+      this.status(`${this.label} failed to start: ${error.message}`);
+      this.lastExitCode = 1;
+    });
+
     this.process.stdout?.pipe(this.logStream);
     this.process.stderr?.pipe(this.logStream);
 
@@ -104,11 +109,11 @@ export class LlamafileManager {
       // If the process has already died, stop waiting immediately instead
       // of polling for the full ~30s timeout — the failure already happened,
       // and the real reason is in the log file we just pointed at.
-      if (!this.process) {
+      if (!this.process || this.process.exitCode !== null) {
         const logPath = this.config.logPath ?? "./mithril.log";
         throw new Error(
-          `${this.label} exited (code ${this.lastExitCode}) before becoming ready. ` +
-            `Check ${logPath} for details.`
+          `${this.label} exited (code ${this.lastExitCode ?? this.process?.exitCode ?? "unknown"}) ` +
+            `before becoming ready. Check ${logPath} for details.`
         );
       }
 

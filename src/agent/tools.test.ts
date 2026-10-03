@@ -36,6 +36,23 @@ test("reads a file inside the project directory", async () => {
   assert.equal(result, "safe content");
 });
 
+test("uses an explicit project-root override instead of the ambient working directory", async () => {
+  const overrideRoot = await mkdtemp(path.join(tmpdir(), "mithril-override-"));
+  const originalRoot = process.env.MITHRIL_PROJECT_ROOT;
+
+  try {
+    await writeFile(path.join(overrideRoot, "allowed.txt"), "override content");
+    process.env.MITHRIL_PROJECT_ROOT = overrideRoot;
+
+    const result = await readFileTool.execute({ path: "allowed.txt" });
+    assert.equal(result, "override content");
+  } finally {
+    if (originalRoot === undefined) delete process.env.MITHRIL_PROJECT_ROOT;
+    else process.env.MITHRIL_PROJECT_ROOT = originalRoot;
+    await rm(overrideRoot, { recursive: true, force: true });
+  }
+});
+
 test("rejects a relative path that walks upward out of the project", async () => {
   const result = await readFileTool.execute({ path: "../outside-secret.txt" });
   assert.match(result, /not allowed/);

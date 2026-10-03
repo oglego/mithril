@@ -1,6 +1,30 @@
 import { readFile, realpath } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import path from "node:path";
 import type { Tool, ApiToolDefinition } from "../types.js";
+
+function resolveProjectRoot(): string {
+  const configuredRoot = process.env.MITHRIL_PROJECT_ROOT;
+  if (configuredRoot && configuredRoot.trim().length > 0) {
+    return path.resolve(configuredRoot);
+  }
+
+  let current = path.resolve(process.cwd());
+  while (true) {
+    if (existsSync(path.join(current, "package.json")) || existsSync(path.join(current, ".git"))) {
+      return current;
+    }
+
+    const parent = path.dirname(current);
+    if (parent === current) return process.cwd();
+    current = parent;
+  }
+}
+
+function isWithinRoot(root: string, target: string): boolean {
+  const relative = path.relative(root, target);
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+}
 
 export const readFileTool: Tool = {
   name: "read_file",
@@ -24,7 +48,7 @@ export const readFileTool: Tool = {
       return 'Error: missing or invalid "path" argument.';
     }
 
-    const projectRoot = process.cwd();
+    const projectRoot = resolveProjectRoot();
     const fullPath = path.resolve(projectRoot, relativePath);
 
     // path.relative tells us how to walk from projectRoot to fullPath.
@@ -32,8 +56,7 @@ export const readFileTool: Tool = {
     // different drive on Windows), fullPath is outside projectRoot.
     // This catches cases a plain startsWith() string check misses, e.g.
     // "/project-evil" incorrectly starting with "/project".
-    const relative = path.relative(projectRoot, fullPath);
-    if (relative.startsWith("..") || path.isAbsolute(relative)) {
+    if (!isWithinRoot(projectRoot, fullPath)) {
       return "Error: access outside the project directory is not allowed.";
     }
 
@@ -43,7 +66,7 @@ export const readFileTool: Tool = {
       // that will actually be read, not just the one that was requested.
       const realFullPath = await realpath(fullPath);
       const realRoot = await realpath(projectRoot);
-      if (realFullPath !== realRoot && !realFullPath.startsWith(realRoot + path.sep)) {
+      if (!isWithinRoot(realRoot, realFullPath)) {
         return "Error: resolved path escapes the project directory.";
       }
 
