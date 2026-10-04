@@ -10,13 +10,16 @@ import { downloadFile } from "./models/downloader.js";
 import { buildIndex } from "./rag/indexer.js";
 import { createSearchDocsTool } from "./rag/rag-tool.js";
 import { tools as baseTools } from "./agent/tools.js";
+import { loadSkills } from "./skills/loader.js";
+import { createLoadSkillTool } from "./skills/skill-tool.js";
 import { BANNER } from "./banner.js";
 import type { Tool } from "./types.js";
 
-// Looks for `--docs <path>` in the CLI args. Kept as manual parsing rather
-// than pulling in a CLI-args library — there's exactly one flag to support.
-function parseDocsFlag(argv: string[]): string | undefined {
-  const i = argv.indexOf("--docs");
+// Looks for `--<flag> <path>` in the CLI args, resolved to an absolute path.
+// Kept as manual parsing rather than pulling in a CLI-args library — there
+// are only two flags to support.
+function parseFlagValue(argv: string[], flag: string): string | undefined {
+  const i = argv.indexOf(flag);
   const value = i !== -1 ? argv[i + 1] : undefined;
   return value ? path.resolve(value) : undefined;
 }
@@ -66,7 +69,8 @@ try {
 
   let tools: Tool[] = baseTools;
 
-  const docsDir = parseDocsFlag(process.argv.slice(2));
+  const argv = process.argv.slice(2);
+  const docsDir = parseFlagValue(argv, "--docs");
 
   if (docsDir) {
     if (!existsSync(MODELS_DIR)) mkdirSync(MODELS_DIR);
@@ -109,6 +113,20 @@ try {
     p.log.info(`Indexed ${index.length} chunk(s) from ${docsDir}.`);
 
     tools = [...baseTools, createSearchDocsTool(index, docsDir, embeddingConfig)];
+  }
+
+  const skillsDir = parseFlagValue(argv, "--skills");
+
+  if (skillsDir) {
+    p.log.info(`Loading skills from ${skillsDir}...`);
+    const skills = await loadSkills(skillsDir);
+
+    if (skills.length > 0) {
+      p.log.info(`Loaded ${skills.length} skill(s): ${skills.map((s) => s.name).join(", ")}`);
+      tools = [...tools, createLoadSkillTool(skills)];
+    } else {
+      p.log.warn(`No SKILL.md files found in ${skillsDir}.`);
+    }
   }
 
   await runRepl({ baseUrl: "http://localhost:8080", model: modelId }, tools);

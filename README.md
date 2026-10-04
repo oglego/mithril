@@ -14,6 +14,7 @@ The app is designed for a local-first workflow: choose a model from a catalog, d
 - Runs a tool-calling agent loop (non-streaming): the model can call local tools, see the results, and respond based on them
 - Includes a local `read_file` tool, sandboxed to the project directory
 - Optional RAG over a folder of markdown notes (`--docs <path>`): indexes the folder with a dedicated embedding model and exposes a `search_docs` tool the model can call on demand
+- Optional skills support (`--skills <path>`): loads `SKILL.md` files compatible with the Claude Code / Codex / community skills convention (e.g. [mattpocock/skills](https://github.com/mattpocock/skills)), exposed as a `load_skill` tool the model calls on demand
 
 ## Requirements
 
@@ -66,6 +67,38 @@ On first use with a given folder, Mithril will:
 
 The model doesn't see your notes automatically; it calls a `search_docs` tool only when it decides your question might be answered by them, and only the retrieved passages are added to the conversation.
 
+### Using skills
+
+Point Mithril at a folder of `SKILL.md` files to let the model load detailed instructions for specific workflows on demand:
+
+```sh
+npm run dev -- --skills ./skills
+```
+
+Each skill is a `SKILL.md` file with YAML frontmatter and a markdown body:
+
+```markdown
+---
+name: tdd
+description: Test-driven development. Use when implementing features or fixing bugs test-first.
+---
+
+# Test-Driven Development
+
+Write a failing test first, then make it pass, then refactor.
+```
+
+Skills can be nested under category folders (`skills/engineering/tdd/SKILL.md`) — Mithril discovers `SKILL.md` files recursively, regardless of depth. This is the same convention used by Claude Code, Codex, and the broader community skills ecosystem, so existing skill packs work without modification. For example, to try [mattpocock/skills](https://github.com/mattpocock/skills):
+
+```sh
+git clone https://github.com/mattpocock/skills /tmp/matt-skills
+npm run dev -- --skills /tmp/matt-skills/skills
+```
+
+Mithril doesn't inject every skill's full content into context up front — only a short name/description catalog is listed in the system prompt. The model calls a single `load_skill` tool with a skill's name to pull in its full instructions only when it decides a task matches, keeping unused skills cheap regardless of how many are available.
+
+`--docs` and `--skills` can be combined, and compose onto the same tool list.
+
 ## How it works
 
 - `src/index.ts` — app entry point; wires everything together
@@ -76,6 +109,7 @@ The model doesn't see your notes automatically; it calls a `search_docs` tool on
 - `src/models/` — model acquisition: `catalog.ts` (chat model list), `embedding-model.ts`, `downloader.ts`, `onboarding.ts` (picker flow), `paths.ts`
 - `src/agent/` — `agent-loop.ts` (tool-calling loop), `tools.ts` (local tools, including `read_file`)
 - `src/rag/` — `chunker.ts`, `indexer.ts`, `retriever.ts`, `rag-tool.ts` (the `search_docs` tool, wired in only when `--docs` is passed)
+- `src/skills/` — `loader.ts` (discovers and parses `SKILL.md` files), `skill-tool.ts` (the `load_skill` tool, wired in only when `--skills` is passed)
 
 ## Local model directory
 
