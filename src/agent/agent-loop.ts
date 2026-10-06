@@ -2,17 +2,18 @@ import type { ChatMessage, Tool } from "../types.js";
 import { chatOnce, type LlamaClientConfig } from "../client/llama-client.js";
 import { toolsToApiFormat } from "./tools.js";
 
-const MAX_STEPS = 5; // safety cap: stops a confused model from looping forever
+const DEFAULT_MAX_STEPS = 15; // Raised from 5 to allow multi-step coding workflows (search -> read -> edit -> test)
 
 export async function runAgentTurn(
   history: ChatMessage[],
   availableTools: Tool[],
   config: LlamaClientConfig,
-  onToolCall?: (toolName: string) => void
+  onToolCall?: (toolName: string) => void,
+  maxSteps: number = DEFAULT_MAX_STEPS
 ): Promise<string> {
   const toolDefs = toolsToApiFormat(availableTools);
 
-  for (let step = 0; step < MAX_STEPS; step++) {
+  for (let step = 0; step < maxSteps; step++) {
     let assistantMessage: ChatMessage;
     try {
       assistantMessage = await chatOnce(history, config, toolDefs);
@@ -35,12 +36,21 @@ export async function runAgentTurn(
         result = `Error: unknown tool "${call.function.name}"`;
       } else {
         onToolCall?.(tool.name);
+
+        let args: Record<string, unknown>;
         try {
           // Some llama.cpp builds send arguments as a JSON string (the
           // OpenAI-standard format); others have shipped it as an already-
           // parsed object. Handle both so a server update doesn't break us.
           const raw = call.function.arguments;
-          const args = typeof raw === "string" ? JSON.parse(raw) : raw;
+          args = typeof raw === "string" ? JSON.parse(raw) : (raw as Record<string, unknown>);
+        } catch (parseErr) {
+          result = `Error: invalid JSON in tool arguments: ${(parseErr as Error).message}. Please retry with valid JSON.`;
+          history.push({ role: "tool", tool_call_id: call.id, name: call.function.name, content: result });
+          continue;
+        }
+
+        try {
           result = await tool.execute(args);
         } catch (err) {
           result = `Error running tool: ${(err as Error).message}`;
