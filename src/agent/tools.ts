@@ -30,6 +30,21 @@ function isWithinRoot(root: string, target: string): boolean {
   return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
 }
 
+// Walks upward from a path until it finds a directory that actually exists
+// on disk. Used to realpath-check a location before creating a new file
+// there: you can't realpath() something that doesn't exist yet, but you can
+// realpath its nearest existing ancestor to catch a symlinked intermediate
+// directory that would silently redirect the write outside the project.
+async function nearestExistingAncestor(target: string): Promise<string> {
+  let current = target;
+  while (!existsSync(current)) {
+    const parent = path.dirname(current);
+    if (parent === current) return current; // reached filesystem root
+    current = parent;
+  }
+  return current;
+}
+
 function isProtectedPath(root: string, target: string): { protected: boolean; reason?: string } {
   const relative = path.relative(root, target).replace(/\\/g, "/");
   const parts = relative.split("/");
@@ -45,8 +60,12 @@ function isProtectedPath(root: string, target: string): { protected: boolean; re
     return { protected: true, reason: "Environment files (.env) are protected from modification." };
   }
 
-  // Protect llamafile models directory
-  if (parts.includes("models") || relative === "models") {
+  // Protect the repo-root llamafile models directory specifically — not any
+  // path segment literally named "models" at any depth. An unanchored check
+  // here would also block src/models/ (legitimate source code, unrelated to
+  // the downloaded-binaries folder this is meant to protect) — the same bug
+  // class that previously broke this project's .gitignore.
+  if (relative === "models" || relative.startsWith("models/")) {
     return { protected: true, reason: "Models directory (models/) is protected from modification." };
   }
 
@@ -217,6 +236,22 @@ export function createWriteFileTool(options?: ToolOptions): Tool {
         return `Error: ${protection.reason}`;
       }
 
+      // Catches a symlinked intermediate directory even for a file that
+      // doesn't exist yet (fullPath itself can't be realpath'd in that
+      // case) — e.g. "legit-looking-dir/new.txt" where legit-looking-dir
+      // is a symlink pointing outside the project. The textual
+      // isWithinRoot check above wouldn't catch this on its own.
+      try {
+        const ancestor = await nearestExistingAncestor(path.dirname(fullPath));
+        const realAncestor = await realpath(ancestor);
+        const realRoot = await realpath(projectRoot);
+        if (!isWithinRoot(realRoot, realAncestor)) {
+          return "Error: resolved path escapes the project directory.";
+        }
+      } catch (err) {
+        return `Error resolving path: ${(err as Error).message}`;
+      }
+
       const fileExists = existsSync(fullPath);
       let oldContent = "";
 
@@ -227,10 +262,6 @@ export function createWriteFileTool(options?: ToolOptions): Tool {
 
         try {
           const realFullPath = await realpath(fullPath);
-          const realRoot = await realpath(projectRoot);
-          if (!isWithinRoot(realRoot, realFullPath)) {
-            return "Error: resolved path escapes the project directory.";
-          }
           oldContent = await readFile(realFullPath, "utf-8");
         } catch (err) {
           return `Error reading existing file for overwrite: ${(err as Error).message}`;
@@ -560,19 +591,26 @@ export function createRunCommandTool(options?: ToolOptions): Tool {
   };
 }
 
+// These three unguarded instances exist mainly so tests can exercise
+// write_file/edit_file/run_command's own logic directly, without needing a
+// live confirmation prompt. They are deliberately NOT included in `tools`
+// below — see that export's comment for why.
 export const writeFileTool = createWriteFileTool();
 export const editFileTool = createEditFileTool();
 export const runCommandTool = createRunCommandTool();
 
-export const tools: Tool[] = [
-  readFileTool,
-  writeFileTool,
-  editFileTool,
-  listDirTool,
-  findFilesTool,
-  searchCodeTool,
-  runCommandTool,
-];
+// Read-only tools only. write_file, edit_file, and run_command are
+// capability-dangerous enough (arbitrary file writes, arbitrary shell
+// execution) that they must never be available without a confirmation
+// callback wired in — and the unguarded singletons above have none. Rather
+// than relying on every caller to remember to swap them out for guarded
+// versions (previously done via a name-matching .map() in repl.ts, which
+// silently granted unguarded access if that remap was ever skipped, typo'd,
+// or bypassed), those tools simply aren't part of the default set at all.
+// repl.ts constructs its own guarded instances explicitly and appends them —
+// see runRepl. Anything else that uses `tools` gets read-only capability
+// by construction, not by convention.
+export const tools: Tool[] = [readFileTool, listDirTool, findFilesTool, searchCodeTool];
 
 // Our internal Tool shape includes an `execute` function, which isn't
 // something we can send over HTTP — this strips it down to just what

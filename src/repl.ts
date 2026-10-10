@@ -46,13 +46,17 @@ export async function runRepl(config: LlamaClientConfig, tools: Tool[]): Promise
     return Boolean(confirmed) && !p.isCancel(confirmed);
   };
 
-  // Wire interactive confirmation into write_file, edit_file, and run_command tools
-  const interactiveTools = tools.map((t) => {
-    if (t.name === "write_file") return createWriteFileTool({ confirm: confirmHook });
-    if (t.name === "edit_file") return createEditFileTool({ confirm: confirmHook });
-    if (t.name === "run_command") return createRunCommandTool({ confirmCommand: confirmCommandHook });
-    return t;
-  });
+  // write_file, edit_file, and run_command aren't part of the incoming
+  // `tools` array at all (see tools.ts) — they're capability-dangerous
+  // enough that they must always be constructed with a confirmation
+  // callback, so the REPL builds and adds them explicitly here rather than
+  // relying on a name-matching swap that could silently be skipped.
+  const interactiveTools: Tool[] = [
+    ...tools,
+    createWriteFileTool({ confirm: confirmHook }),
+    createEditFileTool({ confirm: confirmHook }),
+    createRunCommandTool({ confirmCommand: confirmCommandHook }),
+  ];
 
   const history: ChatMessage[] = [
     { role: "system", content: buildSystemPrompt(interactiveTools) },

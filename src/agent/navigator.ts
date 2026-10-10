@@ -1,15 +1,10 @@
 import { readdir, stat, readFile } from "node:fs/promises";
 import path from "node:path";
 
-const DEFAULT_IGNORED_DIRS = new Set([
-  "node_modules",
-  ".git",
-  "models",
-  "dist",
-  "build",
-  ".next",
-  ".cache",
-]);
+// These are genuinely build-artifact/dependency conventions that should be
+// skipped no matter how deep they appear (e.g. a nested node_modules in a
+// monorepo). "models" is deliberately NOT here — see isIgnored below.
+const DEFAULT_IGNORED_DIRS = new Set(["node_modules", ".git", "dist", "build", ".next", ".cache"]);
 
 const BINARY_EXTENSIONS = new Set([
   ".png",
@@ -30,8 +25,19 @@ const BINARY_EXTENSIONS = new Set([
   ".sqlite",
 ]);
 
-function isIgnored(dirName: string): boolean {
-  return DEFAULT_IGNORED_DIRS.has(dirName) || dirName.startsWith(".git");
+function isIgnored(dirName: string, fullPath: string, projectRoot: string): boolean {
+  if (dirName.startsWith(".git")) return true;
+  if (DEFAULT_IGNORED_DIRS.has(dirName)) return true;
+
+  // "models" refers specifically to the repo-root downloaded-llamafile-
+  // binaries directory, not any directory happening to share that name —
+  // only skip it there, not at e.g. src/models/.
+  if (dirName === "models") {
+    const relative = path.relative(projectRoot, fullPath).replace(/\\/g, "/");
+    return relative === "models";
+  }
+
+  return false;
 }
 
 function isBinary(filePath: string): boolean {
@@ -122,8 +128,9 @@ export async function findFiles(
       if (matches.length >= maxResults) return;
 
       if (entry.isDirectory()) {
-        if (!isIgnored(entry.name)) {
-          await walk(path.join(currentDir, entry.name));
+        const childPath = path.join(currentDir, entry.name);
+        if (!isIgnored(entry.name, childPath, projectRoot)) {
+          await walk(childPath);
         }
       } else if (entry.isFile()) {
         if (entry.name === ".DS_Store") continue;
@@ -197,8 +204,9 @@ export async function searchCode(
       if (results.length >= maxResults) return;
 
       if (entry.isDirectory()) {
-        if (!isIgnored(entry.name)) {
-          await walk(path.join(currentDir, entry.name));
+        const childPath = path.join(currentDir, entry.name);
+        if (!isIgnored(entry.name, childPath, projectRoot)) {
+          await walk(childPath);
         }
       } else if (entry.isFile()) {
         const fullPath = path.join(currentDir, entry.name);

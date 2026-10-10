@@ -14,6 +14,7 @@ import {
   searchCodeTool,
   runCommandTool,
   createRunCommandTool,
+  tools as toolsExport,
 } from "./tools.js";
 import { backupRegistry } from "./file-editor.js";
 import { readFile } from "node:fs/promises";
@@ -331,6 +332,68 @@ test("runCommandTool rejects invalid or missing command argument", async () => {
   assert.match(empty, /missing or invalid "command" argument/);
 });
 
+// --- Code review regression tests ---
 
+test("write_file can create a file under a nested 'models' directory (e.g. src/models/)", async () => {
+  // Pins the fix for an unanchored path check: only the repo-root models/
+  // directory (downloaded llamafile binaries) should be protected, not any
+  // path segment literally named "models" at any depth — src/models/ is
+  // ordinary source code.
+  const result = await writeFileTool.execute({
+    path: "src/models/catalog.ts",
+    content: "export const x = 1;",
+  });
+  assert.equal(result, 'Successfully wrote file "src/models/catalog.ts".');
+});
 
+test("write_file still protects the actual repo-root models/ directory", async () => {
+  const result = await writeFileTool.execute({
+    path: "models/some-llamafile-binary",
+    content: "not a real binary",
+  });
+  assert.match(result, /Models directory \(models\/\) is protected/);
+});
+
+test("write_file edits (not just creates) under src/models/ without being blocked", async () => {
+  await writeFileTool.execute({ path: "src/models/paths.ts", content: "v1" });
+  const result = await writeFileTool.execute({
+    path: "src/models/paths.ts",
+    content: "v2",
+    overwrite: true,
+  });
+  assert.equal(result, 'Successfully wrote file "src/models/paths.ts".');
+});
+
+test("the default tools array does not include write_file, edit_file, or run_command", () => {
+  // These are capability-dangerous enough (arbitrary writes, arbitrary
+  // shell execution) that they must only ever exist with a confirmation
+  // callback wired in. Pins that they're absent from the default set
+  // rather than relying on every caller to remember to swap them out.
+  const dangerousNames = ["write_file", "edit_file", "run_command"];
+  for (const name of dangerousNames) {
+    assert.equal(
+      toolsExport.some((t) => t.name === name),
+      false,
+      `${name} should not be in the default tools array`
+    );
+  }
+});
+
+test("write_file rejects creating a new file inside a symlinked directory that escapes the project", async () => {
+  // The target file ("escape-dir/new.txt") doesn't exist yet, so it can't
+  // be realpath'd directly — this pins the nearest-existing-ancestor check
+  // that catches the symlinked parent directory instead.
+  const linkPath = path.join(projectRoot, "escape-dir");
+  await symlink(outsideDir, linkPath);
+
+  try {
+    const result = await writeFileTool.execute({
+      path: "escape-dir/new.txt",
+      content: "should never land outside the project",
+    });
+    assert.match(result, /escapes the project directory/);
+  } finally {
+    await rm(linkPath, { force: true });
+  }
+});
 

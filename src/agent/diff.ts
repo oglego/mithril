@@ -46,12 +46,29 @@ export function computeLineDiff(oldText: string, newText: string): DiffLine[] {
   return result;
 }
 
+// computeLineDiff's LCS algorithm is O(n*m) in both time and space — a
+// dp matrix with (lines in old + 1) * (lines in new + 1) entries. Fine for
+// ordinary source files, but write_file/edit_file operate on whatever file
+// the model names, so a large enough file could cause a real slowdown or
+// memory spike rather than just a slow diff. This caps it.
+export const MAX_DIFF_LINES = 2000;
+
 export function formatUnifiedDiff(
   filePath: string,
   oldText: string,
   newText: string,
   options: { colorize?: boolean; contextLines?: number } = {}
 ): string {
+  const oldLineCount = oldText.length === 0 ? 0 : oldText.split(/\r?\n/).length;
+  const newLineCount = newText.length === 0 ? 0 : newText.split(/\r?\n/).length;
+
+  if (oldLineCount > MAX_DIFF_LINES || newLineCount > MAX_DIFF_LINES) {
+    return (
+      `(File too large for a detailed diff: ${oldLineCount} → ${newLineCount} lines, ` +
+      `exceeds the ${MAX_DIFF_LINES}-line limit. Skipping line-by-line comparison.)`
+    );
+  }
+
   const { colorize = false, contextLines = 3 } = options;
   const diff = computeLineDiff(oldText, newText);
 

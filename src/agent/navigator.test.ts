@@ -52,6 +52,24 @@ test("findFiles ignores node_modules and models directories", async () => {
   assert.doesNotMatch(allFiles, /models/);
 });
 
+test("findFiles and searchCode still traverse a nested directory literally named 'models'", async () => {
+  // "models" has root-only exclusion semantics (Mithril's downloaded-
+  // binaries folder) — a nested directory that happens to share the name,
+  // like src/models/, is ordinary source code and should stay searchable.
+  await mkdir(path.join(testRoot, "src/models"), { recursive: true });
+  await writeFile(path.join(testRoot, "src/models/catalog.ts"), "export const findMe = true;");
+
+  try {
+    const files = await findFiles(testRoot, testRoot, { extension: "ts" });
+    assert.match(files, /src\/models\/catalog\.ts/);
+
+    const searchResult = await searchCode(testRoot, testRoot, { query: "findMe" });
+    assert.match(searchResult, /src\/models\/catalog\.ts/);
+  } finally {
+    await rm(path.join(testRoot, "src/models"), { recursive: true, force: true });
+  }
+});
+
 test("searchCode finds matching text lines with line numbers and paths", async () => {
   const searchResult = await searchCode(testRoot, testRoot, { query: "hello" });
 
