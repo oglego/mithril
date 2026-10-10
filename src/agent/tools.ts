@@ -591,25 +591,12 @@ export function createRunCommandTool(options?: ToolOptions): Tool {
   };
 }
 
-// These three unguarded instances exist mainly so tests can exercise
-// write_file/edit_file/run_command's own logic directly, without needing a
-// live confirmation prompt. They are deliberately NOT included in `tools`
-// below — see that export's comment for why.
-export const writeFileTool = createWriteFileTool();
-export const editFileTool = createEditFileTool();
-export const runCommandTool = createRunCommandTool();
-
-// Read-only tools only. write_file, edit_file, and run_command are
-// capability-dangerous enough (arbitrary file writes, arbitrary shell
-// execution) that they must never be available without a confirmation
-// callback wired in — and the unguarded singletons above have none. Rather
-// than relying on every caller to remember to swap them out for guarded
-// versions (previously done via a name-matching .map() in repl.ts, which
-// silently granted unguarded access if that remap was ever skipped, typo'd,
-// or bypassed), those tools simply aren't part of the default set at all.
-// repl.ts constructs its own guarded instances explicitly and appends them —
-// see runRepl. Anything else that uses `tools` gets read-only capability
-// by construction, not by convention.
+// These capability-dangerous tools are intentionally created only through
+// the factory functions above, which require a caller-supplied confirmation
+// callback before they can mutate files or execute shell commands. The
+// default `tools` array below stays read-only by construction; callers that
+// want write/edit/command capabilities must create guarded tool instances
+// explicitly.
 export const tools: Tool[] = [readFileTool, listDirTool, findFilesTool, searchCodeTool];
 
 // Our internal Tool shape includes an `execute` function, which isn't

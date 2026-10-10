@@ -4,7 +4,7 @@ import * as p from "@clack/prompts";
 import { runRepl } from "./repl.js";
 import { LlamafileManager } from "./llamafile/manager.js";
 import { selectAndPrepareModel } from "./models/onboarding.js";
-import { MODELS_DIR } from "./models/paths.js";
+import { getModelsDir } from "./models/paths.js";
 import { EMBEDDING_MODEL } from "./models/embedding-model.js";
 import { downloadFile } from "./models/downloader.js";
 import { buildIndex } from "./rag/indexer.js";
@@ -52,6 +52,7 @@ console.log(BANNER);
 p.intro("------------------------------------------------------------");
 
 try {
+  const MODELS_DIR = getModelsDir();
   const { binaryPath, modelId } = await selectAndPrepareModel();
 
   const llamafile = new LlamafileManager({

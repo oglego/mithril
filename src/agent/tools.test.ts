@@ -5,17 +5,15 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import {
   readFileTool,
-  writeFileTool,
-  editFileTool,
   createWriteFileTool,
   createEditFileTool,
   listDirTool,
   findFilesTool,
   searchCodeTool,
-  runCommandTool,
   createRunCommandTool,
   tools as toolsExport,
 } from "./tools.js";
+import { getModelsDir } from "../models/paths.js";
 import { backupRegistry } from "./file-editor.js";
 import { readFile } from "node:fs/promises";
 
@@ -170,6 +168,10 @@ test("rejects invalid start_line and line_count arguments", async () => {
 
 // --- writeFileTool Tests ---
 
+const writeFileTool = createWriteFileTool();
+const editFileTool = createEditFileTool();
+const runCommandTool = createRunCommandTool();
+
 test("writeFileTool creates a new file inside the project directory", async () => {
   const result = await writeFileTool.execute({
     path: "src/new-file.txt",
@@ -313,6 +315,21 @@ test("runCommandTool executes command and returns exit code and output", async (
   const result = await runCommandTool.execute({ command: 'node -e "console.log(12345)"' });
   assert.match(result, /Exit code: 0/);
   assert.match(result, /12345/);
+});
+
+test("getModelsDir resolves against the configured project root, not the ambient cwd", async () => {
+  const originalRoot = process.env.MITHRIL_PROJECT_ROOT;
+  const overrideRoot = await mkdtemp(path.join(tmpdir(), "mithril-model-root-"));
+
+  try {
+    process.env.MITHRIL_PROJECT_ROOT = overrideRoot;
+    const modelsDir = getModelsDir();
+    assert.equal(modelsDir, path.join(overrideRoot, "models"));
+  } finally {
+    if (originalRoot === undefined) delete process.env.MITHRIL_PROJECT_ROOT;
+    else process.env.MITHRIL_PROJECT_ROOT = originalRoot;
+    await rm(overrideRoot, { recursive: true, force: true });
+  }
 });
 
 test("runCommandTool respects confirmation hook when declined", async () => {

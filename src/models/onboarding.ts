@@ -3,7 +3,7 @@ import { existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { MODEL_CATALOG } from "./catalog.js";
 import { downloadFile } from "./downloader.js";
-import { MODELS_DIR } from "./paths.js";
+import { getModelsDir } from "./paths.js";
 
 export interface PreparedModel {
   binaryPath: string;
@@ -11,6 +11,8 @@ export interface PreparedModel {
 }
 
 export async function selectAndPrepareModel(): Promise<PreparedModel> {
+  const MODELS_DIR = getModelsDir();
+
   const choice = await p.select({
     message: "Which model do you want to run?",
     options: MODEL_CATALOG.map((m) => ({
