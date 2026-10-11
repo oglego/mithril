@@ -1,22 +1,56 @@
 import type { ChatMessage, Tool } from "../types.js";
-import { chatOnce, type LlamaClientConfig } from "../client/llama-client.js";
+import { chatOnceWithUsage, type LlamaClientConfig } from "../client/llama-client.js";
 import { toolsToApiFormat } from "./tools.js";
+import { capToolResult, suggestedWindowFor, type CompactionReport, type ContextManager } from "./context-manager.js";
 
 const DEFAULT_MAX_STEPS = 15; // Raised from 5 to allow multi-step coding workflows (search -> read -> edit -> test)
+
+export interface AgentContextOptions {
+  manager: ContextManager;
+  // Called whenever compaction actually changed the history.
+  onCompact?: (report: CompactionReport) => void;
+}
 
 export async function runAgentTurn(
   history: ChatMessage[],
   availableTools: Tool[],
   config: LlamaClientConfig,
   onToolCall?: (toolName: string) => void,
-  maxSteps: number = DEFAULT_MAX_STEPS
+  maxSteps: number = DEFAULT_MAX_STEPS,
+  context?: AgentContextOptions
 ): Promise<string> {
   const toolDefs = toolsToApiFormat(availableTools);
 
   for (let step = 0; step < maxSteps; step++) {
+    // Re-check the budget before EVERY model call, not just once per user
+    // message: a single turn can run up to maxSteps tool calls, and their
+    // results are what actually fill the context window.
+    if (context) {
+      const report = context.manager.prepare(history, toolDefs);
+      if (report.changed) context.onCompact?.(report);
+      if (!report.fits) {
+        const budget = context.manager.maxInputTokens;
+        // Most often the real culprit is a window too small for the agent's
+        // fixed overhead, not the conversation. Say so, with a number.
+        if (report.fixedTokens > budget * 0.75) {
+          return (
+            `(Stopped: the system prompt and tool definitions alone use ~${report.fixedTokens} tokens, ` +
+            `but the prompt budget is only ${budget}. Restart with --context ${suggestedWindowFor(report.fixedTokens)} or larger.)`
+          );
+        }
+        return (
+          `(Stopped: this request no longer fits in the model's context window ` +
+          `(~${report.tokensAfter} tokens needed, budget ${budget}). ` +
+          `Restart with a larger --context value, or break the task into smaller steps.)`
+        );
+      }
+    }
+
     let assistantMessage: ChatMessage;
     try {
-      assistantMessage = await chatOnce(history, config, toolDefs);
+      const { message, usage } = await chatOnceWithUsage(history, config, toolDefs);
+      assistantMessage = message;
+      context?.manager.observeUsage(usage.promptTokens);
     } catch (err) {
       return `Error talking to the model server: ${(err as Error).message}`;
     }
@@ -56,6 +90,9 @@ export async function runAgentTurn(
           result = `Error running tool: ${(err as Error).message}`;
         }
       }
+
+      // A single oversized result must not be able to blow the budget alone.
+      if (context) result = capToolResult(result, context.manager.maxToolResultChars);
 
       history.push({ role: "tool", tool_call_id: call.id, name: call.function.name, content: result });
     }

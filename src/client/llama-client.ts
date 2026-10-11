@@ -76,11 +76,18 @@ export async function* chatStream(
   }
 }
 
-export async function chatOnce(
+export interface ChatUsage {
+  promptTokens?: number | undefined;
+}
+
+// Same as chatOnce, but also returns the server-reported token usage when
+// present. Kept separate from the message so the usage never ends up inside
+// the conversation history (servers can reject unknown message fields).
+export async function chatOnceWithUsage(
   messages: ChatMessage[],
   config: LlamaClientConfig,
   toolDefs?: ApiToolDefinition[]
-): Promise<ChatMessage> {
+): Promise<{ message: ChatMessage; usage: ChatUsage }> {
   const response = await fetch(`${config.baseUrl}/v1/chat/completions`, {
     method: "POST",
     headers: buildHeaders(config),
@@ -107,6 +114,7 @@ export async function chatOnce(
         tool_calls?: ChatMessage["tool_calls"];
       };
     }[];
+    usage?: { prompt_tokens?: unknown };
   }
 
   const data: ChatCompletionResponse = await response.json();
@@ -116,12 +124,24 @@ export async function chatOnce(
   }
 
   const message = data.choices[0].message;
+  const promptTokens = typeof data.usage?.prompt_tokens === "number" ? data.usage.prompt_tokens : undefined;
 
   return {
-    role: "assistant",
-    content: message.content ?? "",
-    ...(message.tool_calls ? { tool_calls: message.tool_calls } : {}),
+    message: {
+      role: "assistant",
+      content: message.content ?? "",
+      ...(message.tool_calls ? { tool_calls: message.tool_calls } : {}),
+    },
+    usage: { promptTokens },
   };
+}
+
+export async function chatOnce(
+  messages: ChatMessage[],
+  config: LlamaClientConfig,
+  toolDefs?: ApiToolDefinition[]
+): Promise<ChatMessage> {
+  return (await chatOnceWithUsage(messages, config, toolDefs)).message;
 }
 
 // Calls an embedding-mode llamafile server's /v1/embeddings endpoint and

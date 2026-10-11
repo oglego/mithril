@@ -16,6 +16,14 @@ import { BANNER } from "./banner.js";
 import { resolveBackend, parsePathFlag, probeBackend, ConfigError } from "./config.js";
 import type { Tool } from "./types.js";
 import type { LlamaClientConfig } from "./client/llama-client.js";
+import { ContextManager } from "./agent/context-manager.js";
+import {
+  parseContextFlag,
+  fetchServerContextSize,
+  resolveContextWindow,
+  describeWindow,
+  type ResolvedWindow,
+} from "./context-window.js";
 
 // Every LlamafileManager we start needs to be stopped no matter how the app
 // ends — a failed download, a crash mid-startup, a normal "exit", or a
@@ -49,7 +57,9 @@ try {
   const argv = process.argv.slice(2);
   const backend = resolveBackend(argv);
 
+  const contextFlag = parseContextFlag(argv);
   let chatConfig: LlamaClientConfig;
+  let contextWindow: ResolvedWindow;
 
   if (backend.kind === "remote") {
     // Remote mode: no catalog picker, no download, no local server. Mithril
@@ -58,6 +68,7 @@ try {
     const warning = await probeBackend(backend.baseUrl, backend.apiKey);
     if (warning) p.log.warn(warning);
     chatConfig = { baseUrl: backend.baseUrl, model: backend.model, apiKey: backend.apiKey };
+    contextWindow = resolveContextWindow({ flag: contextFlag, kind: "remote" });
   } else {
     const selection = await selectBackend();
 
@@ -66,11 +77,15 @@ try {
       // already contacted the server, so no second probe here.
       p.log.info(`Using remote backend ${selection.baseUrl} (model: ${selection.model}).`);
       chatConfig = { baseUrl: selection.baseUrl, model: selection.model, apiKey: selection.apiKey };
+      contextWindow = resolveContextWindow({ flag: contextFlag, kind: "remote" });
     } else {
       const llamafile = new LlamafileManager({
         binaryPath: selection.binaryPath,
         port: 8080,
-        extraArgs: ["--jinja", "--no-webui"], // this catalog's binaries are new enough for --no-webui
+        // this catalog's binaries are new enough for --no-webui. -c is only
+        // passed when the user asked for a specific window; otherwise the
+        // server's own setting is detected after startup.
+        extraArgs: ["--jinja", "--no-webui", ...(contextFlag ? ["-c", String(contextFlag)] : [])],
         logPath: "./mithril.log",
         name: "chat model",
         onStatus: (message) => p.log.step(message),
@@ -80,8 +95,13 @@ try {
       managers.push(llamafile);
       await llamafile.start();
       chatConfig = { baseUrl: "http://localhost:8080", model: selection.modelId };
+      const detected = contextFlag ? null : await fetchServerContextSize("http://localhost:8080");
+      contextWindow = resolveContextWindow({ flag: contextFlag, detected, kind: "local" });
     }
   }
+
+  p.log.info(describeWindow(contextWindow));
+  const context = new ContextManager({ contextWindow: contextWindow.window });
 
   let tools: Tool[] = baseTools;
 
@@ -144,7 +164,7 @@ try {
     }
   }
 
-  await runRepl(chatConfig, tools);
+  await runRepl(chatConfig, tools, context);
 
   // Normal exit path (typed "exit", or Ctrl+C inside the chat prompt, which
   // clack intercepts as a cancel rather than a process-level SIGINT).

@@ -4,16 +4,17 @@ import type { ChatMessage, Tool } from "./types.js";
 import type { LlamaClientConfig } from "./client/llama-client.js";
 import { runAgentTurn } from "./agent/agent-loop.js";
 import { buildSystemPrompt } from "./agent/system-prompt.js";
-import { trimHistory, DEFAULT_MAX_TOKENS } from "./agent/context.js";
+import { formatCompactionReport, suggestedWindowFor, type ContextManager } from "./agent/context-manager.js";
 import {
   createWriteFileTool,
   createEditFileTool,
   createRunCommandTool,
+  toolsToApiFormat,
   type DiffConfirmDetails,
 } from "./agent/tools.js";
 import { backupRegistry } from "./agent/file-editor.js";
 
-export async function runRepl(config: LlamaClientConfig, tools: Tool[]): Promise<void> {
+export async function runRepl(config: LlamaClientConfig, tools: Tool[], context: ContextManager): Promise<void> {
   let activeSpinner: ReturnType<typeof p.spinner> | null = null;
 
   const confirmHook = async (details: DiffConfirmDetails): Promise<boolean> => {
@@ -62,7 +63,19 @@ export async function runRepl(config: LlamaClientConfig, tools: Tool[]): Promise
     { role: "system", content: buildSystemPrompt(interactiveTools) },
   ];
 
-  p.log.message("Type a message, /undo to revert edits, /diff to see modified files, or Ctrl+C to exit.");
+  p.log.message("Type a message, /undo to revert edits, /diff to see modified files, /context for context usage, or Ctrl+C to exit.");
+
+  // A window barely bigger than the agent's fixed overhead can't hold a
+  // conversation. Warn up front instead of failing on the first message.
+  {
+    const fixed = context.fixedPromptTokens(history, toolsToApiFormat(interactiveTools));
+    if (fixed > context.maxInputTokens * 0.6) {
+      p.log.warn(
+        `The system prompt and tools use ~${fixed} tokens, leaving little room in a ${context.contextWindow}-token window. ` +
+          `Use --context ${suggestedWindowFor(fixed)} or larger for a usable session.`
+      );
+    }
+  }
 
   while (true) {
     const userInput = await p.text({
@@ -106,30 +119,41 @@ export async function runRepl(config: LlamaClientConfig, tools: Tool[]): Promise
       continue;
     }
 
-    history.push({ role: "user", content: userInput });
-
-    // Trim history to stay within the model's context window. The system
-    // prompt (index 0) is always preserved; the oldest conversational
-    // messages are dropped first.
-    const { trimmed, removedCount } = trimHistory(history, DEFAULT_MAX_TOKENS);
-    if (removedCount > 0) {
-      p.log.warn(`Trimmed ${removedCount} older message(s) to fit the context window.`);
-      // Replace the live history with the trimmed version so the dropped
-      // messages don't accumulate and get re-trimmed every turn.
-      history.length = 0;
-      history.push(...trimmed);
+    if (userInput.trim().toLowerCase() === "/context") {
+      p.log.message(context.describe(history, toolsToApiFormat(interactiveTools)));
+      continue;
     }
+
+    history.push({ role: "user", content: userInput });
 
     const spin = p.spinner();
     activeSpinner = spin;
     spin.start("Thinking...");
 
-    const reply = await runAgentTurn(history, interactiveTools, config, (toolName) => {
-      spin.message(`Calling ${toolName}...`);
-    });
+    // Compaction now happens inside the agent loop (before every model call).
+    // Notices are collected and printed after the spinner stops, so they
+    // don't garble the spinner line.
+    const notices: string[] = [];
+    const reply = await runAgentTurn(
+      history,
+      interactiveTools,
+      config,
+      (toolName) => {
+        spin.message(`Calling ${toolName}...`);
+      },
+      undefined,
+      {
+        manager: context,
+        onCompact: (report) => {
+          notices.push(formatCompactionReport(report));
+          spin.message("Compacting context...");
+        },
+      }
+    );
 
     spin.stop("Done.");
     activeSpinner = null;
+    for (const notice of notices) p.log.info(notice);
 
     // note() draws a titled, bordered panel — gives each reply a clear
     // visual boundary in a scrolling transcript, instead of a plain line
