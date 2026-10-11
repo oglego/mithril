@@ -18,7 +18,7 @@ export async function runAgentTurn(
     try {
       assistantMessage = await chatOnce(history, config, toolDefs);
     } catch (err) {
-      return `Error talking to llama-server: ${(err as Error).message}`;
+      return `Error talking to the model server: ${(err as Error).message}`;
     }
     history.push(assistantMessage);
 

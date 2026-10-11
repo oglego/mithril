@@ -6,6 +6,18 @@ export interface LlamaClientConfig {
   baseUrl: string;
   model: string;
   queryPrefix?: string;
+  // Bearer token for hosted/authenticated OpenAI-compatible backends.
+  // Local llamafile servers don't need one, so this stays optional.
+  apiKey?: string | undefined;
+}
+
+// Single place that decides which headers every request carries, so the
+// auth header can't be forgotten on one of the four call sites below.
+export function buildHeaders(config: LlamaClientConfig): Record<string, string> {
+  return {
+    "Content-Type": "application/json",
+    ...(config.apiKey ? { Authorization: `Bearer ${config.apiKey}` } : {}),
+  };
 }
 
 
@@ -15,7 +27,7 @@ export async function* chatStream(
 ): AsyncGenerator<string> {
   const response = await fetch(`${config.baseUrl}/v1/chat/completions`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: buildHeaders(config),
     body: JSON.stringify({
       model: config.model,
       messages: messages,
@@ -71,7 +83,7 @@ export async function chatOnce(
 ): Promise<ChatMessage> {
   const response = await fetch(`${config.baseUrl}/v1/chat/completions`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: buildHeaders(config),
     body: JSON.stringify({
       model: config.model,
       messages,
@@ -81,7 +93,11 @@ export async function chatOnce(
 
   if (!response.ok) {
     const errorText = await response.text().catch(() => "");
-    throw new Error(`llama-server request failed (${response.status}): ${errorText}`);
+    const hint =
+      response.status === 401 || response.status === 403
+        ? " — check that MITHRIL_API_KEY is set and valid for this backend"
+        : "";
+    throw new Error(`chat request failed (${response.status}): ${errorText}${hint}`);
   }
 
   interface ChatCompletionResponse {
@@ -113,7 +129,7 @@ export async function chatOnce(
 export async function embedOnce(text: string, config: LlamaClientConfig): Promise<number[]> {
   const response = await fetch(`${config.baseUrl}/v1/embeddings`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: buildHeaders(config),
     body: JSON.stringify({ model: config.model, input: text }),
   });
 
@@ -153,7 +169,7 @@ export async function embedBatch(
   try {
     const response = await fetch(`${config.baseUrl}/v1/embeddings`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: buildHeaders(config),
       body: JSON.stringify({ model: config.model, input: texts }),
     });
 

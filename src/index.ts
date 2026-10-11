@@ -13,16 +13,9 @@ import { tools as baseTools } from "./agent/tools.js";
 import { loadSkills } from "./skills/loader.js";
 import { createLoadSkillTool } from "./skills/skill-tool.js";
 import { BANNER } from "./banner.js";
+import { resolveBackend, parsePathFlag, probeBackend, ConfigError } from "./config.js";
 import type { Tool } from "./types.js";
-
-// Looks for `--<flag> <path>` in the CLI args, resolved to an absolute path.
-// Kept as manual parsing rather than pulling in a CLI-args library — there
-// are only two flags to support.
-function parseFlagValue(argv: string[], flag: string): string | undefined {
-  const i = argv.indexOf(flag);
-  const value = i !== -1 ? argv[i + 1] : undefined;
-  return value ? path.resolve(value) : undefined;
-}
+import type { LlamaClientConfig } from "./client/llama-client.js";
 
 // Every LlamafileManager we start needs to be stopped no matter how the app
 // ends — a failed download, a crash mid-startup, a normal "exit", or a
@@ -53,25 +46,39 @@ p.intro("------------------------------------------------------------");
 
 try {
   const MODELS_DIR = getModelsDir();
-  const { binaryPath, modelId } = await selectAndPrepareModel();
+  const argv = process.argv.slice(2);
+  const backend = resolveBackend(argv);
 
-  const llamafile = new LlamafileManager({
-    binaryPath,
-    port: 8080,
-    extraArgs: ["--jinja", "--no-webui"], // this catalog's binaries are new enough for --no-webui
-    logPath: "./mithril.log",
-    name: "chat model",
-    onStatus: (message) => p.log.step(message),
-  });
+  let chatConfig: LlamaClientConfig;
 
-  // Pushed before start() so a failed start() still gets cleaned up by catch.
-  managers.push(llamafile);
-  await llamafile.start();
+  if (backend.kind === "remote") {
+    // Remote mode: no catalog picker, no download, no local server. Mithril
+    // talks to whatever OpenAI-compatible endpoint the user pointed it at.
+    p.log.info(`Using remote backend ${backend.baseUrl} (model: ${backend.model}).`);
+    const warning = await probeBackend(backend.baseUrl, backend.apiKey);
+    if (warning) p.log.warn(warning);
+    chatConfig = { baseUrl: backend.baseUrl, model: backend.model, apiKey: backend.apiKey };
+  } else {
+    const { binaryPath, modelId } = await selectAndPrepareModel();
+
+    const llamafile = new LlamafileManager({
+      binaryPath,
+      port: 8080,
+      extraArgs: ["--jinja", "--no-webui"], // this catalog's binaries are new enough for --no-webui
+      logPath: "./mithril.log",
+      name: "chat model",
+      onStatus: (message) => p.log.step(message),
+    });
+
+    // Pushed before start() so a failed start() still gets cleaned up by catch.
+    managers.push(llamafile);
+    await llamafile.start();
+    chatConfig = { baseUrl: "http://localhost:8080", model: modelId };
+  }
 
   let tools: Tool[] = baseTools;
 
-  const argv = process.argv.slice(2);
-  const docsDir = parseFlagValue(argv, "--docs");
+  const docsDir = parsePathFlag(argv, "--docs");
 
   if (docsDir) {
     if (!existsSync(MODELS_DIR)) mkdirSync(MODELS_DIR);
@@ -116,7 +123,7 @@ try {
     tools = [...baseTools, createSearchDocsTool(index, docsDir, embeddingConfig)];
   }
 
-  const skillsDir = parseFlagValue(argv, "--skills");
+  const skillsDir = parsePathFlag(argv, "--skills");
 
   if (skillsDir) {
     p.log.info(`Loading skills from ${skillsDir}...`);
@@ -130,14 +137,15 @@ try {
     }
   }
 
-  await runRepl({ baseUrl: "http://localhost:8080", model: modelId }, tools);
+  await runRepl(chatConfig, tools);
 
   // Normal exit path (typed "exit", or Ctrl+C inside the chat prompt, which
   // clack intercepts as a cancel rather than a process-level SIGINT).
   stopAll();
   process.exit(0);
 } catch (err) {
-  console.error(`Mithril failed to start: ${(err as Error).message}`);
+  const prefix = err instanceof ConfigError ? "Mithril configuration error" : "Mithril failed to start";
+  console.error(`${prefix}: ${(err as Error).message}`);
   stopAll();
   process.exit(1);
 }

@@ -1,6 +1,6 @@
 # Mithril
 
-Mithril is a small TypeScript command-line app that downloads a local llamafile model, starts it as a local OpenAI-compatible chat server, and provides a tool-using REPL for chatting with that model.
+Mithril is a small TypeScript command-line coding assistant. By default it downloads a local llamafile model, starts it as a local OpenAI-compatible chat server, and opens a tool-using REPL. It can also connect to any OpenAI-compatible server you already run (Ollama, LM Studio, vLLM, OpenRouter, OpenAI, ...).
 
 The app is designed for a local-first workflow: choose a model from a catalog, download it if it is not already present, launch the model server, and open an agent loop without needing a separate hosted AI service.
 
@@ -12,7 +12,9 @@ The app is designed for a local-first workflow: choose a model from a catalog, d
 - Polls the server health endpoint until it is ready
 - Sends chat requests to the OpenAI-compatible `/v1/chat/completions` endpoint
 - Runs a tool-calling agent loop (non-streaming): the model can call local tools, see the results, and respond based on them
-- Includes a local `read_file` tool, sandboxed to the project directory
+- Coding tools: `read_file`, `list_dir`, `find_files`, `search_code` (read-only), plus `write_file`, `edit_file` and `run_command`, which always ask for confirmation first (diffs are shown for edits). `/undo` reverts the last edited file and `/diff` lists files modified this session
+- File tools are sandboxed to the project directory (including symlink checks); `.git`, `.env*` and `models/` are protected from writes
+- Bring your own backend: `--base-url` / `--model` point Mithril at any OpenAI-compatible server instead of a local llamafile (see below)
 - Optional RAG over a folder of markdown notes (`--docs <path>`): indexes the folder with a dedicated embedding model and exposes a `search_docs` tool the model can call on demand
 - Optional skills support (`--skills <path>`): loads `SKILL.md` files compatible with the Claude Code / Codex / community skills convention (e.g. [mattpocock/skills](https://github.com/mattpocock/skills)), exposed as a `load_skill` tool the model calls on demand
 
@@ -49,6 +51,30 @@ The first run will:
 Type a message and press Enter. A spinner shows while the model is thinking, updating to show tool activity (e.g. "Calling search_docs...") if the model uses one along the way. The reply appears in a bordered panel once ready. Type `exit` or press Ctrl+C to quit.
 
 Server logs from llamafile itself are written to `mithril.log`, not the terminal, to keep the chat output clean.
+
+### Using a different backend (Ollama, LM Studio, OpenAI, ...)
+
+Skip the model picker and local download by pointing Mithril at a server that is already running:
+
+```sh
+# Ollama
+npm run dev -- --base-url http://localhost:11434 --model qwen3:8b
+
+# LM Studio
+npm run dev -- --base-url http://localhost:1234 --model qwen2.5-coder-7b-instruct
+
+# A hosted provider (key via environment, never a flag)
+export MITHRIL_API_KEY=sk-...
+npm run dev -- --base-url https://api.openai.com/v1 --model gpt-4.1
+```
+
+- `--base-url` accepts the URL with or without a trailing `/v1`.
+- `--model` is required with `--base-url`: it's the model name your server expects.
+- The API key is read from `MITHRIL_API_KEY` (falling back to `OPENAI_API_KEY`). There is intentionally no `--api-key` flag, since command-line arguments leak into shell history and process listings.
+- `MITHRIL_BASE_URL` and `MITHRIL_MODEL` can be used instead of the flags.
+- Mithril sends a quick `GET /v1/models` at startup and warns (without exiting) if the server is unreachable or rejects your key.
+- The backend must support OpenAI-style tool calling (`tools` / `tool_calls`) for the agent features to work.
+- `--docs` still launches a local embedding model for RAG, regardless of which chat backend you use.
 
 ### Chatting with your notes (RAG)
 
@@ -102,6 +128,7 @@ Mithril doesn't inject every skill's full content into context up front — only
 ## How it works
 
 - `src/index.ts` — app entry point; wires everything together
+- `src/config.ts` — backend selection (local llamafile vs. remote OpenAI-compatible server) and flag/env parsing
 - `src/types.ts` — shared types used across the project
 - `src/repl.ts` — the interactive chat loop
 - `src/client/llama-client.ts` — HTTP client for chat, streaming, and embeddings
@@ -134,8 +161,8 @@ The REPL currently uses non-streaming requests, since tool-calling responses are
 ## Project status
 
 - TypeScript is configured with Node types enabled; `npm run build` type-checks the project without emitting output.
-- `npm test` runs Node's built-in test runner (`node --test`); no tests are written yet.
-- This is a local learning project rather than a hardened production application. The `read_file` tool is sandboxed to the project directory, but no other tools have been added yet, and there is no confirmation step before a tool runs.
+- `npm test` runs Node's built-in test runner through `tsx`; new test files must be added to the list in `package.json`.
+- This is a local learning project rather than a hardened production application. File tools are sandboxed to the project directory, and `write_file`, `edit_file` and `run_command` require your confirmation each time. `run_command` executes through your shell with your full environment, so the confirmation prompt is the only safeguard: read commands before approving them.
 
 ## Development notes
 
