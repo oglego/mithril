@@ -1,3 +1,15 @@
+```text
+╔═══════════════════════════════════════════════════════════╗
+║                                                           ║
+║  ███╗   ███╗ ██╗ ████████╗ ██╗  ██╗ ██████╗  ██╗ ██╗      ║
+║  ████╗ ████║ ██║ ╚══██╔══╝ ██║  ██║ ██╔══██╗ ██║ ██║      ║
+║  ██╔████╔██║ ██║    ██║    ███████║ ██████╔╝ ██║ ██║      ║
+║  ██║╚██╔╝██║ ██║    ██║    ██╔══██║ ██╔══██╗ ██║ ██║      ║
+║  ██║ ╚═╝ ██║ ██║    ██║    ██║  ██║ ██║  ██║ ██║ ███████╗ ║
+║  ╚═╝     ╚═╝ ╚═╝    ╚═╝    ╚═╝  ╚═╝ ╚═╝  ╚═╝ ╚═╝ ╚══════╝ ║
+║                                                           ║
+╚═══════════════════════════════════════════════════════════╝
+```
 # Mithril
 
 Mithril is a small TypeScript command-line coding assistant. By default it downloads a local llamafile model, starts it as a local OpenAI-compatible chat server, and opens a tool-using REPL. It can also connect to any OpenAI-compatible server you already run (Ollama, LM Studio, vLLM, OpenRouter, OpenAI, ...).
