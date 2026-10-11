@@ -79,25 +79,48 @@ export function resolveBackend(
   return { kind: "remote", baseUrl: normalizeBaseUrl(rawBaseUrl), model, apiKey };
 }
 
-// Best-effort reachability probe for remote backends. Returns a warning
-// string if something looks wrong, or null if the server answered. Never
-// throws: some providers don't implement /v1/models, so a failure here
-// should inform the user, not block startup.
-export async function probeBackend(
+export interface ModelListing {
+  ids: string[];
+  // Set when something looks wrong (unreachable, bad credentials). The caller
+  // decides how loudly to surface it; a listing failure is never fatal.
+  warning: string | null;
+}
+
+// Asks an OpenAI-compatible server which models it serves (GET /v1/models).
+// Never throws. Ollama, LM Studio, vLLM and the hosted providers implement
+// this; a server that doesn't just yields an empty list with no warning, since
+// it's still reachable and the user can type a model name by hand.
+export async function fetchModelIds(
   baseUrl: string,
   apiKey?: string,
   timeoutMs = 5000
-): Promise<string | null> {
+): Promise<ModelListing> {
   try {
     const response = await fetch(`${baseUrl}/v1/models`, {
       headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {},
       signal: AbortSignal.timeout(timeoutMs),
     });
     if (response.status === 401 || response.status === 403) {
-      return `Server at ${baseUrl} rejected the credentials (${response.status}). Check MITHRIL_API_KEY.`;
+      return {
+        ids: [],
+        warning: `Server at ${baseUrl} rejected the credentials (${response.status}). Check your API key.`,
+      };
     }
-    return null; // 200, or 404 from providers without /v1/models — either way it's reachable
+    if (!response.ok) return { ids: [], warning: null };
+
+    const body: unknown = await response.json().catch(() => null);
+    const data = (body as { data?: unknown } | null)?.data;
+    const ids = Array.isArray(data)
+      ? data.flatMap((m) => (typeof (m as { id?: unknown })?.id === "string" ? [(m as { id: string }).id] : []))
+      : [];
+    return { ids: [...new Set(ids)].sort((a, b) => a.localeCompare(b)), warning: null };
   } catch (err) {
-    return `Could not reach ${baseUrl} (${(err as Error).message}). Is the server running?`;
+    return { ids: [], warning: `Could not reach ${baseUrl} (${(err as Error).message}). Is the server running?` };
   }
+}
+
+// Best-effort reachability probe for remote backends: returns a warning
+// string if something looks wrong, or null if the server answered.
+export async function probeBackend(baseUrl: string, apiKey?: string, timeoutMs = 5000): Promise<string | null> {
+  return (await fetchModelIds(baseUrl, apiKey, timeoutMs)).warning;
 }

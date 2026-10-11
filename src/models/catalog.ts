@@ -1,12 +1,23 @@
 export interface ModelInfo {
   name: string;
   size: string;
-  license: string;
+  // Not every model has a known license: entries discovered dynamically from
+  // the model repo only carry one if it appears in the curated list below.
+  license?: string;
   url: string;
   filename: string;
 }
 
-export const MODEL_CATALOG: ModelInfo[] = [
+// Hugging Face repo that hosts the llamafiles Mithril knows how to run.
+export const CATALOG_REPO = "mozilla-ai/llamafile_0.10";
+
+// Curated list. This is no longer the source of truth for *what exists* — the
+// live repo listing is (see catalog-source.ts). It serves two purposes:
+//   1. Offline fallback: if the repo can't be reached and there's no cache,
+//      this is the list the picker shows.
+//   2. Display metadata: friendly names and license info for models we've
+//      tried, applied on top of whatever the live listing returns.
+export const FALLBACK_CATALOG: ModelInfo[] = [
   { name: "Qwen3.5 0.8B (Q8_0)", size: "1.6 GB", license: "Apache 2.0",
     url: "https://huggingface.co/mozilla-ai/llamafile_0.10/resolve/main/Qwen3.5-0.8B-Q8_0.llamafile",
     filename: "Qwen3.5-0.8B-Q8_0.llamafile" },

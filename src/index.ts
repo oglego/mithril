@@ -3,7 +3,7 @@ import { existsSync, mkdirSync } from "node:fs";
 import * as p from "@clack/prompts";
 import { runRepl } from "./repl.js";
 import { LlamafileManager } from "./llamafile/manager.js";
-import { selectAndPrepareModel } from "./models/onboarding.js";
+import { selectBackend } from "./models/onboarding.js";
 import { getModelsDir } from "./models/paths.js";
 import { EMBEDDING_MODEL } from "./models/embedding-model.js";
 import { downloadFile } from "./models/downloader.js";
@@ -59,21 +59,28 @@ try {
     if (warning) p.log.warn(warning);
     chatConfig = { baseUrl: backend.baseUrl, model: backend.model, apiKey: backend.apiKey };
   } else {
-    const { binaryPath, modelId } = await selectAndPrepareModel();
+    const selection = await selectBackend();
 
-    const llamafile = new LlamafileManager({
-      binaryPath,
-      port: 8080,
-      extraArgs: ["--jinja", "--no-webui"], // this catalog's binaries are new enough for --no-webui
-      logPath: "./mithril.log",
-      name: "chat model",
-      onStatus: (message) => p.log.step(message),
-    });
+    if (selection.kind === "remote") {
+      // Picked "Connect to a server…" in the model picker. The setup flow has
+      // already contacted the server, so no second probe here.
+      p.log.info(`Using remote backend ${selection.baseUrl} (model: ${selection.model}).`);
+      chatConfig = { baseUrl: selection.baseUrl, model: selection.model, apiKey: selection.apiKey };
+    } else {
+      const llamafile = new LlamafileManager({
+        binaryPath: selection.binaryPath,
+        port: 8080,
+        extraArgs: ["--jinja", "--no-webui"], // this catalog's binaries are new enough for --no-webui
+        logPath: "./mithril.log",
+        name: "chat model",
+        onStatus: (message) => p.log.step(message),
+      });
 
-    // Pushed before start() so a failed start() still gets cleaned up by catch.
-    managers.push(llamafile);
-    await llamafile.start();
-    chatConfig = { baseUrl: "http://localhost:8080", model: modelId };
+      // Pushed before start() so a failed start() still gets cleaned up by catch.
+      managers.push(llamafile);
+      await llamafile.start();
+      chatConfig = { baseUrl: "http://localhost:8080", model: selection.modelId };
+    }
   }
 
   let tools: Tool[] = baseTools;

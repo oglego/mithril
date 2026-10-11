@@ -7,6 +7,8 @@ The app is designed for a local-first workflow: choose a model from a catalog, d
 ## Features
 
 - ASCII-art banner on launch, followed by interactive model selection (`@clack/prompts`)
+- Model list discovered live from the Hugging Face repo that hosts the llamafiles, cached for 24 hours, with a built-in list as an offline fallback (see [Model catalog](#model-catalog))
+- "Connect to a server…" entry in the picker for Ollama, LM Studio, OpenAI, OpenRouter, or any OpenAI-compatible API
 - Automatic download of selected llamafile models into a local `models/` directory, with atomic writes so an interrupted download can't be mistaken for a complete one
 - Launches the model with `--server --port 8080 --no-webui --jinja`
 - Polls the server health endpoint until it is ready
@@ -43,7 +45,7 @@ npm run dev
 
 The first run will:
 
-1. Prompt you to choose a model from the built-in catalog.
+1. Prompt you to choose a model from the catalog (or "Connect to a server…" to use a remote backend).
 2. Download that model into `./models` if it is not already present.
 3. Start the llamafile server locally on port `8080`.
 4. Open the REPL.
@@ -54,7 +56,9 @@ Server logs from llamafile itself are written to `mithril.log`, not the terminal
 
 ### Using a different backend (Ollama, LM Studio, OpenAI, ...)
 
-Skip the model picker and local download by pointing Mithril at a server that is already running:
+**From the picker:** choose "Connect to a server…" at the bottom of the model list. Mithril asks which server (Ollama, LM Studio, OpenAI, OpenRouter, or a custom URL), then the URL, then an API key if needed (masked, kept in memory only, never written to disk), then lets you pick from the models the server reports at `/v1/models`. If the server doesn't list models, you can type a name instead.
+
+**From the command line:** skip the picker entirely by pointing Mithril at a server that is already running:
 
 ```sh
 # Ollama
@@ -125,6 +129,21 @@ Mithril doesn't inject every skill's full content into context up front — only
 
 `--docs` and `--skills` can be combined, and compose onto the same tool list.
 
+## Model catalog
+
+The picker's model list is not hardcoded. On startup Mithril asks the Hugging Face API for the file listing of [`mozilla-ai/llamafile_0.10`](https://huggingface.co/mozilla-ai/llamafile_0.10), keeps the chat-capable `.llamafile` files (embedding models are excluded), and reads their real sizes from the listing. When the repo adds or removes a model, the picker follows.
+
+Resolution order, so the picker always has something to show:
+
+1. A cache younger than 24 hours (`models/.catalog-cache.json`)
+2. The live listing (then cached)
+3. A stale cache, if the network is down
+4. The curated list in `src/models/catalog.ts`, which also supplies friendly names and license info for models we've tried. Models it doesn't know about get a name derived from the filename (`Qwen3.5-4B-Q5_K_S.llamafile` becomes "Qwen3.5 4B (Q5_K_S)") and no license hint.
+
+Any `.llamafile` already sitting in `models/` is always listed (marked "downloaded"), even if upstream has since removed it. The picker tells you when it is showing a cached or built-in list instead of a fresh one.
+
+Models discovered this way haven't necessarily been tested with Mithril. The curated entries are the ones that have.
+
 ## How it works
 
 - `src/index.ts` — app entry point; wires everything together
@@ -133,7 +152,7 @@ Mithril doesn't inject every skill's full content into context up front — only
 - `src/repl.ts` — the interactive chat loop
 - `src/client/llama-client.ts` — HTTP client for chat, streaming, and embeddings
 - `src/llamafile/manager.ts` — launches and monitors a llamafile process
-- `src/models/` — model acquisition: `catalog.ts` (chat model list), `embedding-model.ts`, `downloader.ts`, `onboarding.ts` (picker flow), `paths.ts`
+- `src/models/` — model acquisition: `catalog.ts` (curated fallback list), `catalog-source.ts` (live discovery, caching, fallback), `remote-setup.ts` (the "Connect to a server…" flow), `embedding-model.ts`, `downloader.ts`, `onboarding.ts` (picker flow), `paths.ts`
 - `src/agent/` — `agent-loop.ts` (tool-calling loop), `tools.ts` (local tools, including `read_file`)
 - `src/rag/` — `chunker.ts`, `indexer.ts`, `retriever.ts`, `rag-tool.ts` (the `search_docs` tool, wired in only when `--docs` is passed)
 - `src/skills/` — `loader.ts` (discovers and parses `SKILL.md` files), `skill-tool.ts` (the `load_skill` tool, wired in only when `--skills` is passed)
