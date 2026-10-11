@@ -163,7 +163,7 @@ About 20% of the window (512 to 4,096 tokens) is reserved for the model's reply.
 
 Things to know:
 
-- **Fixed overhead is substantial.** The system prompt plus the tool definitions currently use about 1,600 tokens. Windows below about 4,096 tokens leave little room for conversation; Mithril warns at startup if yours is too small and suggests a value.
+- **Fixed overhead is kept small on purpose.** The system prompt plus the tool definitions use about 850 estimated tokens, paid on every model call (see the [overhead budget test](src/agent/overhead.test.ts)). Windows below about 3,072 tokens leave little room for conversation; Mithril warns at startup if yours is too small and suggests a value. Enabling `--docs` or `--skills` adds a tool, and the skills list is part of that tool's description, so a large skills folder costs context.
 - **Token counts are estimated** (about 4 characters per token) and then calibrated against the `usage.prompt_tokens` your server reports, so budgets adapt to the model's actual tokenizer. Servers that don't report usage just stay on the estimate.
 - **Ollama:** its OpenAI-compatible endpoint serves the model's configured `num_ctx` (often 2,048 to 4,096 by default), regardless of what Mithril assumes. Set a larger `num_ctx` in Ollama, then pass a matching `--context`.
 - The compaction summary is a heuristic. The model is told to re-read files or re-run commands if it needs exact details.

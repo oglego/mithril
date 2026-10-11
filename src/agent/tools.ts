@@ -91,23 +91,14 @@ export interface ToolOptions {
 export const readFileTool: Tool = {
   name: "read_file",
   description:
-    "Read the contents of a text file from disk, given a relative path. Supports optional windowed reading with line numbers for large files.",
+    "Read a text file. Use start_line and line_count to read part of a large file.",
   parameters: {
     type: "object",
     properties: {
-      path: { type: "string", description: "Relative path to the file to read." },
-      start_line: {
-        type: "integer",
-        description: "Optional 1-indexed line number to start reading from.",
-      },
-      line_count: {
-        type: "integer",
-        description: "Optional number of lines to read.",
-      },
-      line_numbers: {
-        type: "boolean",
-        description: "Optional: whether to prepend line numbers (e.g. '1: code'). Defaults to false.",
-      },
+      path: { type: "string" },
+      start_line: { type: "integer", description: "1-indexed." },
+      line_count: { type: "integer" },
+      line_numbers: { type: "boolean", description: "Prefix each line with its number." },
     },
     required: ["path"],
   },
@@ -199,16 +190,13 @@ export function createWriteFileTool(options?: ToolOptions): Tool {
   return {
     name: "write_file",
     description:
-      "Create a new file or completely overwrite an existing file with new content. For modifying existing files, prefer edit_file.",
+      "Create a file, or fully replace one (set overwrite=true). Prefer edit_file for changes.",
     parameters: {
       type: "object",
       properties: {
-        path: { type: "string", description: "Relative path of the file to write." },
-        content: { type: "string", description: "The complete text content to write." },
-        overwrite: {
-          type: "boolean",
-          description: "Must be set to true if overwriting an existing file. Defaults to false.",
-        },
+        path: { type: "string" },
+        content: { type: "string", description: "The complete file content." },
+        overwrite: { type: "boolean", description: "Required to replace an existing file." },
       },
       required: ["path", "content"],
     },
@@ -306,24 +294,14 @@ export function createEditFileTool(options?: ToolOptions): Tool {
   return {
     name: "edit_file",
     description:
-      "Make targeted edits to an existing file by replacing a specific code snippet (target_content) with new code (replacement_content).",
+      "Replace target_content with replacement_content in an existing file.",
     parameters: {
       type: "object",
       properties: {
-        path: { type: "string", description: "Relative path of the file to edit." },
-        target_content: {
-          type: "string",
-          description: "The exact snippet of text/code to find and replace.",
-        },
-        replacement_content: {
-          type: "string",
-          description: "The new code to replace target_content with.",
-        },
-        allow_multiple: {
-          type: "boolean",
-          description:
-            "If true, replaces all occurrences of target_content. Defaults to false (enforces unique match).",
-        },
+        path: { type: "string" },
+        target_content: { type: "string", description: "Exact text to find; must match exactly once." },
+        replacement_content: { type: "string" },
+        allow_multiple: { type: "boolean", description: "Replace every match instead of requiring one." },
       },
       required: ["path", "target_content", "replacement_content"],
     },
@@ -417,14 +395,11 @@ export function createEditFileTool(options?: ToolOptions): Tool {
 export const listDirTool: Tool = {
   name: "list_dir",
   description:
-    "List files and subdirectories within a specified directory (defaults to project root). Displays file sizes and directory markers.",
+    "List a directory (default: project root) with file sizes.",
   parameters: {
     type: "object",
     properties: {
-      path: {
-        type: "string",
-        description: "Relative path of directory to list. Defaults to '.' (project root).",
-      },
+      path: { type: "string" },
     },
   },
   execute: async (args) => {
@@ -452,22 +427,13 @@ export const listDirTool: Tool = {
 export const findFilesTool: Tool = {
   name: "find_files",
   description:
-    "Recursively find files in the project matching an optional pattern or extension. Automatically ignores node_modules, .git, and models.",
+    "Recursively find files by name pattern and/or extension. Skips node_modules, .git and models.",
   parameters: {
     type: "object",
     properties: {
-      pattern: {
-        type: "string",
-        description: "Optional wildcard pattern to filter filenames (e.g. '*test*', '*.config*').",
-      },
-      extension: {
-        type: "string",
-        description: "Optional file extension to filter by (e.g. 'ts', 'json', 'md').",
-      },
-      directory: {
-        type: "string",
-        description: "Optional relative directory path to search within. Defaults to '.' (project root).",
-      },
+      pattern: { type: "string", description: "Wildcard, e.g. '*test*'." },
+      extension: { type: "string", description: "e.g. 'ts'." },
+      directory: { type: "string" },
     },
   },
   execute: async (args) => {
@@ -498,22 +464,13 @@ export const findFilesTool: Tool = {
 export const searchCodeTool: Tool = {
   name: "search_code",
   description:
-    "Search for text or a regular expression pattern across codebase files. Returns matching file paths, line numbers, and snippets.",
+    "Search file contents for text or a regex. Returns path, line number and snippet.",
   parameters: {
     type: "object",
     properties: {
-      query: {
-        type: "string",
-        description: "The string or regex pattern to search for across project files.",
-      },
-      is_regex: {
-        type: "boolean",
-        description: "Whether to evaluate query as a regular expression. Defaults to false.",
-      },
-      directory: {
-        type: "string",
-        description: "Optional relative directory path to search within. Defaults to '.' (project root).",
-      },
+      query: { type: "string" },
+      is_regex: { type: "boolean", description: "Treat query as a regex." },
+      directory: { type: "string" },
     },
     required: ["query"],
   },
@@ -550,18 +507,12 @@ export function createRunCommandTool(options?: ToolOptions): Tool {
   return {
     name: "run_command",
     description:
-      "Execute a shell command inside the project root directory (e.g. running tests, linters, or build scripts). Enforces timeouts and limits output size.",
+      "Run a shell command in the project root (tests, builds, linters). Time and output are limited.",
     parameters: {
       type: "object",
       properties: {
-        command: {
-          type: "string",
-          description: "The shell command to execute in the project root.",
-        },
-        timeout_seconds: {
-          type: "integer",
-          description: "Optional execution timeout in seconds (default 30, max 120).",
-        },
+        command: { type: "string" },
+        timeout_seconds: { type: "integer", description: "Default 30, max 120." },
       },
       required: ["command"],
     },
