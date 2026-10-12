@@ -9,6 +9,10 @@ export interface LlamaClientConfig {
   // Bearer token for hosted/authenticated OpenAI-compatible backends.
   // Local llamafile servers don't need one, so this stays optional.
   apiKey?: string | undefined;
+  // Sampling temperature. Left unset, the server's own default applies.
+  temperature?: number | undefined;
+  // Aborts an in-flight chat request (used for wall-clock limits in evals).
+  signal?: AbortSignal | undefined;
 }
 
 // Single place that decides which headers every request carries, so the
@@ -78,6 +82,7 @@ export async function* chatStream(
 
 export interface ChatUsage {
   promptTokens?: number | undefined;
+  completionTokens?: number | undefined;
 }
 
 // Same as chatOnce, but also returns the server-reported token usage when
@@ -91,9 +96,11 @@ export async function chatOnceWithUsage(
   const response = await fetch(`${config.baseUrl}/v1/chat/completions`, {
     method: "POST",
     headers: buildHeaders(config),
+    signal: config.signal ?? null,
     body: JSON.stringify({
       model: config.model,
       messages,
+      ...(config.temperature !== undefined ? { temperature: config.temperature } : {}),
       ...(toolDefs ? { tools: toolDefs, tool_choice: "auto" } : {}),
     }),
   });
@@ -114,7 +121,7 @@ export async function chatOnceWithUsage(
         tool_calls?: ChatMessage["tool_calls"];
       };
     }[];
-    usage?: { prompt_tokens?: unknown };
+    usage?: { prompt_tokens?: unknown; completion_tokens?: unknown };
   }
 
   const data: ChatCompletionResponse = await response.json();
@@ -132,7 +139,10 @@ export async function chatOnceWithUsage(
       content: message.content ?? "",
       ...(message.tool_calls ? { tool_calls: message.tool_calls } : {}),
     },
-    usage: { promptTokens },
+    usage: {
+      promptTokens,
+      completionTokens: typeof data.usage?.completion_tokens === "number" ? data.usage.completion_tokens : undefined,
+    },
   };
 }
 

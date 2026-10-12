@@ -1,0 +1,7 @@
+{
+  "id": "answer-code-question",
+  "title": "Answer a question about the code (no edits)",
+  "prompt": "Without changing any files: which environment variable sets the server's port, and what port is used if it is not set? Answer in one or two sentences.",
+  "type": "answer",
+  "max_steps": 10
+}

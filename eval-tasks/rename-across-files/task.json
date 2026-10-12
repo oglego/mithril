@@ -1,0 +1,6 @@
+{
+  "id": "rename-across-files",
+  "title": "Rename a function across several files",
+  "prompt": "Rename the function `getUser` to `fetchUser` everywhere in the project: its definition, the imports, and every call. The program must keep working.",
+  "max_steps": 15
+}

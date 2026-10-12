@@ -168,6 +168,32 @@ Things to know:
 - **Ollama:** its OpenAI-compatible endpoint serves the model's configured `num_ctx` (often 2,048 to 4,096 by default), regardless of what Mithril assumes. Set a larger `num_ctx` in Ollama, then pass a matching `--context`.
 - The compaction summary is a heuristic. The model is told to re-read files or re-run commands if it needs exact details.
 
+## Evaluating models (`mithril eval`)
+
+`mithril eval` runs coding tasks against a model and reports how many it completes, so claims like "works on a 4B model" can be measured instead of guessed. It uses the same backend startup, system prompt, tools and context management as the chat app.
+
+```sh
+# Pick a model interactively (local llamafile or a server), run every task 3 times
+npm run dev -- eval --runs 3 --label baseline
+
+# Against a server that is already running
+npm run dev -- eval --base-url http://localhost:11434 --model qwen3:8b --runs 3
+
+# Just some tasks, with a fixed temperature
+npm run dev -- eval --task fix-off-by-one,rename-across-files --temperature 0.2
+
+# Compare two results files
+npm run dev -- eval --compare eval-results/before.json eval-results/after.json
+```
+
+**What it measures per run:** pass or fail (graded by a script, not by the model), model calls, tool calls split into *malformed* (unknown tool, unparseable arguments) and *failed* (the tool ran and reported an error), declined commands, tokens when the server reports them, peak prompt size, and time. Failed runs record why (`no_changes`, `check_failed`, `wrong_answer`, `max_steps`, `timeout`, `context_limit`, `server_error`) and keep their transcript, so you can read what the model actually did. Results are written to `eval-results/` as JSON.
+
+**Reading the numbers:** models are not deterministic, and a few runs is a small sample. Summaries show pass counts with a 95% interval, and `--compare` says "within noise" unless the intervals separate. Use `--runs 3` or more, and treat per-task differences from a handful of runs as anecdotes.
+
+**Tasks** live in `eval-tasks/`. Each is a directory with `task.json` (id, title, prompt, optional limits), a `fixture/` project, a `check.mjs` that grades the result, and a reference `solution/`. The check runs outside the project, so the agent can neither see nor edit it. `mithril eval --verify-tasks` proves every task is sound with no model: the untouched fixture must fail its check and the reference solution must pass. Point `--tasks <dir>` at your own directory to add tasks.
+
+**Safety:** eval mode approves file edits automatically and runs the commands the model asks for, inside a temporary copy of each task. Commands are limited to the task's allow-list (default: `node`) and may not contain shell operators. That is an accident guard, not a sandbox: an allowed `node` can still run any script the agent writes, and check scripts execute code the agent produced. Run evals in a container or VM for models you don't trust.
+
 ## Model catalog
 
 The picker's model list is not hardcoded. On startup Mithril asks the Hugging Face API for the file listing of [`mozilla-ai/llamafile_0.10`](https://huggingface.co/mozilla-ai/llamafile_0.10), keeps the chat-capable `.llamafile` files (embedding models are excluded), and reads their real sizes from the listing. When the repo adds or removes a model, the picker follows.
@@ -193,6 +219,8 @@ Models discovered this way haven't necessarily been tested with Mithril. The cur
 - `src/llamafile/manager.ts` — launches and monitors a llamafile process
 - `src/models/` — model acquisition: `catalog.ts` (curated fallback list), `catalog-source.ts` (live discovery, caching, fallback), `remote-setup.ts` (the "Connect to a server…" flow), `embedding-model.ts`, `downloader.ts`, `onboarding.ts` (picker flow), `paths.ts`
 - `src/agent/` — `agent-loop.ts` (tool-calling loop), `tools.ts` (local tools, including `read_file`), `context-manager.ts` (keeps the prompt within the context window), `context.ts` (token estimation and the older simple trimmer)
+- `src/backend.ts` — starts whichever chat backend was requested (shared by the chat app and `mithril eval`)
+- `src/eval/` — the evaluation harness (`cli.ts`, `runner.ts`, `tasks.ts`, `report.ts`, `policy.ts`, `stats.ts`); `eval-tasks/` holds the built-in tasks
 - `src/context-window.ts` — `--context` parsing, detecting the server's window, and defaults
 - `src/rag/` — `chunker.ts`, `indexer.ts`, `retriever.ts`, `rag-tool.ts` (the `search_docs` tool, wired in only when `--docs` is passed)
 - `src/skills/` — `loader.ts` (discovers and parses `SKILL.md` files), `skill-tool.ts` (the `load_skill` tool, wired in only when `--skills` is passed)

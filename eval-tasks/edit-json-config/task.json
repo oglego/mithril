@@ -1,0 +1,6 @@
+{
+  "id": "edit-json-config",
+  "title": "Make precise edits to a JSON file",
+  "prompt": "In config.json, change `server.port` to 9090 and `logging.level` to \"debug\". Leave everything else exactly as it is, and keep the file valid JSON.",
+  "max_steps": 8
+}

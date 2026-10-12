@@ -1,0 +1,6 @@
+{
+  "id": "fix-off-by-one",
+  "title": "Fix an off-by-one bug found by tests",
+  "prompt": "The function `paginate` in src/paginate.mjs should return the items on a given page, with pages numbered from 1, but page 1 returns the wrong items. Find the bug and fix it. You can run the tests with `node --test`.",
+  "max_steps": 12
+}

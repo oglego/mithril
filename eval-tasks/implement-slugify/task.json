@@ -1,0 +1,6 @@
+{
+  "id": "implement-slugify",
+  "title": "Implement a function from its comment",
+  "prompt": "Implement the `slugify` function in src/strings.mjs, following the description in its comment. Do not change the other functions in the file.",
+  "max_steps": 10
+}

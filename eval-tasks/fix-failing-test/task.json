@@ -1,0 +1,6 @@
+{
+  "id": "fix-failing-test",
+  "title": "Make failing tests pass by fixing the source, not the tests",
+  "prompt": "The tests in test/pricing.test.mjs are failing. Run them with `node --test`, work out what is wrong in the source code, and fix the source. Do not change the tests.",
+  "max_steps": 12
+}

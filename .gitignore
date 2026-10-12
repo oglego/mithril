@@ -16,3 +16,5 @@ coverage/
 # RAG index cache — contains chunked content from the user's --docs folder,
 # not just embedding vectors, so this can leak note content if committed
 .mithril-index.json
+
+eval-results/

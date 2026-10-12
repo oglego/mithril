@@ -1,0 +1,6 @@
+{
+  "id": "create-clamp-module",
+  "title": "Create a new file from a description",
+  "prompt": "Create a new file src/clamp.mjs that exports a function `clamp(value, min, max)` (a named export) returning `value` limited to the range from `min` to `max`. If `min` is greater than `max`, it must throw an Error.",
+  "max_steps": 8
+}

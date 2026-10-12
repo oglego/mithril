@@ -1,0 +1,6 @@
+{
+  "id": "fix-crash-from-error",
+  "title": "Run a program, read the error, fix the cause",
+  "prompt": "Running `node src/main.mjs` crashes. Run it, find out why, and fix the underlying problem so that it prints `listening on port 3000`.",
+  "max_steps": 12
+}

@@ -1,0 +1,6 @@
+{
+  "id": "add-currency-param",
+  "title": "Add an optional parameter without breaking callers",
+  "prompt": "Add an optional second parameter `currency` to `formatPrice` in src/format.mjs. It defaults to \"USD\" (symbol $). Also support \"EUR\" (symbol \u20ac) and \"GBP\" (symbol \u00a3). Existing callers must keep working unchanged. An unsupported currency code must throw an Error.",
+  "max_steps": 12
+}

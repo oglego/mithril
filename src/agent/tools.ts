@@ -553,6 +553,22 @@ export const tools: Tool[] = [readFileTool, listDirTool, findFilesTool, searchCo
 // Our internal Tool shape includes an `execute` function, which isn't
 // something we can send over HTTP — this strips it down to just what
 // the API needs to know about.
+// write_file, edit_file and run_command are deliberately NOT in the default
+// `tools` array: they can change the machine, so they must always be built
+// with a confirmation callback. Every caller (the chat REPL, the eval
+// harness) adds them through this one function so the set stays identical.
+export function withMutatingTools(
+  base: Tool[],
+  callbacks: { confirm: DiffConfirmCallback; confirmCommand: CommandConfirmCallback }
+): Tool[] {
+  return [
+    ...base,
+    createWriteFileTool({ confirm: callbacks.confirm }),
+    createEditFileTool({ confirm: callbacks.confirm }),
+    createRunCommandTool({ confirmCommand: callbacks.confirmCommand }),
+  ];
+}
+
 export function toolsToApiFormat(toolList: Tool[]): ApiToolDefinition[] {
   return toolList.map((t) => ({
     type: "function",

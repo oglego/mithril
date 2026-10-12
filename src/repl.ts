@@ -5,13 +5,7 @@ import type { LlamaClientConfig } from "./client/llama-client.js";
 import { runAgentTurn } from "./agent/agent-loop.js";
 import { buildSystemPrompt } from "./agent/system-prompt.js";
 import { formatCompactionReport, suggestedWindowFor, type ContextManager } from "./agent/context-manager.js";
-import {
-  createWriteFileTool,
-  createEditFileTool,
-  createRunCommandTool,
-  toolsToApiFormat,
-  type DiffConfirmDetails,
-} from "./agent/tools.js";
+import { withMutatingTools, toolsToApiFormat, type DiffConfirmDetails } from "./agent/tools.js";
 import { backupRegistry } from "./agent/file-editor.js";
 
 export async function runRepl(config: LlamaClientConfig, tools: Tool[], context: ContextManager): Promise<void> {
@@ -52,12 +46,10 @@ export async function runRepl(config: LlamaClientConfig, tools: Tool[], context:
   // enough that they must always be constructed with a confirmation
   // callback, so the REPL builds and adds them explicitly here rather than
   // relying on a name-matching swap that could silently be skipped.
-  const interactiveTools: Tool[] = [
-    ...tools,
-    createWriteFileTool({ confirm: confirmHook }),
-    createEditFileTool({ confirm: confirmHook }),
-    createRunCommandTool({ confirmCommand: confirmCommandHook }),
-  ];
+  const interactiveTools: Tool[] = withMutatingTools(tools, {
+    confirm: confirmHook,
+    confirmCommand: confirmCommandHook,
+  });
 
   const history: ChatMessage[] = [
     { role: "system", content: buildSystemPrompt(interactiveTools) },
