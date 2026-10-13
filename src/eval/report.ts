@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { intervalsOverlap, mean, wilsonInterval } from "./stats.js";
 import type { EvalReport, RunResult } from "./types.js";
@@ -93,7 +93,11 @@ export function formatSummary(report: EvalReport): string {
   const row = (cols: string[]) =>
     cols[0]!.padEnd(idWidth) + "  " + cols.slice(1).map((c, i) => (i === 0 ? c.padEnd(6) : c.padEnd(10))).join("");
 
+  const completed = tasks.reduce((n, t) => n + t.runs, 0);
   const lines: string[] = [
+    ...(report.partial
+      ? [`PARTIAL RESULTS: ${completed} of ${report.plannedRuns ?? "?"} planned runs completed. Do not compare these with a finished run.`, ""]
+      : []),
     `Model: ${report.backend.model}   Context window: ${report.contextWindow.window.toLocaleString("en-US")} (${report.contextWindow.source})` +
       `   Runs per task: ${report.runsPerTask}` +
       (report.temperature !== null ? `   Temperature: ${report.temperature}` : ""),
@@ -129,12 +133,22 @@ export function formatSummary(report: EvalReport): string {
   return lines.join("\n");
 }
 
+// The file a run's results go to. Derived from the start time and label only,
+// so the same path is used every time the run saves.
+export function reportFilePath(outDir: string, startedAt: string, label: string): string {
+  const stamp = startedAt.replace(/[:.]/g, "-");
+  const slug = label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  return path.join(outDir, `${stamp}${slug ? `-${slug}` : ""}.json`);
+}
+
+// Written to a temporary file and renamed into place, so a crash or kill in
+// the middle of a save can never leave a truncated results file behind.
 export async function writeReport(report: EvalReport, outDir: string): Promise<string> {
   await mkdir(outDir, { recursive: true });
-  const stamp = report.startedAt.replace(/[:.]/g, "-");
-  const slug = report.label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
-  const file = path.join(outDir, `${stamp}${slug ? `-${slug}` : ""}.json`);
-  await writeFile(file, JSON.stringify(report, null, 2), "utf-8");
+  const file = reportFilePath(outDir, report.startedAt, report.label);
+  const temp = `${file}.tmp`;
+  await writeFile(temp, JSON.stringify(report, null, 2), "utf-8");
+  await rename(temp, file);
   return file;
 }
 
@@ -180,6 +194,9 @@ export function formatComparison(a: EvalReport, b: EvalReport): string {
 
   const oa = sa.overall, ob = sb.overall;
   const rateA = oa.passes / Math.max(1, oa.runs), rateB = ob.passes / Math.max(1, ob.runs);
+  for (const [name, r] of [["A", a], ["B", b]] as const) {
+    if (r.partial) lines.push(`Warning: ${name} is a partial result (the run did not finish), so its numbers are incomplete.`);
+  }
   lines.push(
     "",
     `Overall A: ${oa.passes}/${oa.runs} (${pct(rateA)}, ${pct(oa.interval.low)} to ${pct(oa.interval.high)})`,

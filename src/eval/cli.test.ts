@@ -1,14 +1,17 @@
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
+import { readdirSync, readFileSync } from "node:fs";
 import { mkdtemp, mkdir, writeFile, rm, readFile, readdir } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { parseEvalArgs, validateFlags, checkInteractive, runEvalCli, HELP } from "./cli.js";
+import { parseEvalArgs, validateFlags, checkInteractive, runEvalCli, runLine, plural, HELP } from "./cli.js";
+import { emptyMetrics } from "./runner.js";
 import { ConfigError } from "../config.js";
 import { loadTasks } from "./tasks.js";
 import { oracleScript, startScriptedModel } from "./testing.js";
-import type { EvalReport } from "./types.js";
+import type { EvalReport, RunResult } from "./types.js";
 
 const TASKS_DIR = fileURLToPath(new URL("../../eval-tasks", import.meta.url));
 const scratch: string[] = [];
@@ -152,6 +155,8 @@ test("a full evaluation run: backend flags, real tasks, results file, summary, t
     assert.match(files[0]!, /oracle-run\.json$/);
     const saved = JSON.parse(await readFile(path.join(out, files[0]!), "utf-8")) as EvalReport;
     assert.equal(saved.schemaVersion, 1);
+    assert.equal(saved.partial, false, "a finished run is not partial");
+    assert.equal(saved.plannedRuns, 4);
     assert.equal(saved.backend.model, "scripted");
     assert.equal(saved.runsPerTask, 2);
     assert.equal(saved.tasks.length, 2);
@@ -187,4 +192,129 @@ test("the prompt fingerprint is stable between runs and differs when the prompt 
   }
   assert.equal(fingerprints.length, 2);
   assert.equal(fingerprints[0], fingerprints[1]);
+});
+
+// ---- progress lines ----
+
+function fakeRun(over: Partial<RunResult> & { steps?: number; calls?: number } = {}): RunResult {
+  const metrics = emptyMetrics();
+  metrics.modelCalls = over.steps ?? 2;
+  metrics.toolCalls = over.calls ?? 1;
+  return {
+    task: "t", run: 1, passed: true, stopReason: "answered", durationMs: 1500, changedFiles: [], reply: "", metrics,
+    check: { passed: true, exitCode: 0, timedOut: false, output: "" },
+    ...over,
+  };
+}
+
+test("progress lines use correct singular and plural forms", () => {
+  assert.equal(plural(1, "step"), "1 step");
+  assert.equal(plural(0, "step"), "0 steps");
+  assert.equal(plural(2, "tool call"), "2 tool calls");
+  assert.match(runLine(fakeRun({ steps: 1, calls: 1 })), /^PASS {2}\(1 step, 1 tool call, /);
+  assert.match(runLine(fakeRun({ steps: 2, calls: 0 })), /\(2 steps, 0 tool calls, /);
+  assert.match(runLine(fakeRun({ passed: false, failureKind: "empty_reply" })), /^FAIL {2}empty_reply {2}\(/);
+});
+
+// ---- saving after every run ----
+
+test("results are saved after every run, marked partial until the end", async () => {
+  const tasks = await loadTasks(TASKS_DIR);
+  const out = await mkdtemp(path.join(os.tmpdir(), "mithril-incremental-"));
+  scratch.push(out);
+  const oracle = oracleScript(tasks);
+  const snapshots: { call: number; partial: boolean | undefined; runs: number }[] = [];
+  const model = await startScriptedModel((ctx) => {
+    // fix-off-by-one takes 2 model calls per run, so calls 3 and 5 are the first
+    // calls of runs 2 and 3: by then the earlier runs must already be on disk.
+    if (ctx.call === 3 || ctx.call === 5) {
+      const files = readdirSync(out).filter((f) => f.endsWith(".json"));
+      const saved = JSON.parse(readFileSync(path.join(out, files[0]!), "utf-8")) as EvalReport;
+      snapshots.push({ call: ctx.call, partial: saved.partial, runs: saved.tasks[0]!.runs.length });
+    }
+    return oracle(ctx);
+  });
+  try {
+    const { result } = await capture(() => runEvalCli(["--base-url", model.baseUrl, "--model", "m", "--task", "fix-off-by-one", "--runs", "3", "--out", out]));
+    assert.equal(result, 0);
+    assert.deepEqual(snapshots, [
+      { call: 3, partial: true, runs: 1 },
+      { call: 5, partial: true, runs: 2 },
+    ]);
+    const files = (await readdir(out)).filter((f) => f.endsWith(".json"));
+    assert.equal(files.length, 1, "one file, overwritten after each run");
+    assert.equal((await readdir(out)).length, 1, "no leftover temporary file");
+    const final = JSON.parse(await readFile(path.join(out, files[0]!), "utf-8")) as EvalReport;
+    assert.equal(final.partial, false);
+    assert.equal(final.tasks[0]!.runs.length, 3);
+  } finally {
+    await model.close();
+  }
+});
+
+// ---- Ctrl+C / docker stop ----
+
+async function waitFor(predicate: () => boolean, ms: number): Promise<void> {
+  const deadline = Date.now() + ms;
+  while (!predicate()) {
+    if (Date.now() > deadline) throw new Error("timed out waiting for the condition");
+    await new Promise((r) => setTimeout(r, 50));
+  }
+}
+
+async function interrupt(signal: "SIGINT" | "SIGTERM", expectedExit: number): Promise<void> {
+  const tasks = await loadTasks(TASKS_DIR);
+  const oracle = oracleScript(tasks);
+  const model = await startScriptedModel((ctx) => ({ ...oracle(ctx), delayMs: 250 }));
+  const out = await mkdtemp(path.join(os.tmpdir(), "mithril-interrupt-"));
+  scratch.push(out);
+  const env = { ...process.env };
+  delete env.NODE_TEST_CONTEXT;
+
+  const root = fileURLToPath(new URL("../..", import.meta.url));
+  const child = spawn(
+    process.execPath,
+    ["--import", "tsx", path.join(root, "src", "index.ts"), "eval", "--base-url", model.baseUrl, "--model", "m", "--task", "fix-off-by-one", "--runs", "40", "--out", out, "--label", "interrupt-test"],
+    { cwd: root, env }
+  );
+  let output = "";
+  child.stdout.on("data", (d: Buffer) => (output += d));
+  child.stderr.on("data", (d: Buffer) => (output += d));
+  const exited = new Promise<number | string | null>((resolve) => child.on("exit", (code, sig) => resolve(code ?? sig)));
+  try {
+    await waitFor(() => /\bPASS\b/.test(output), 60_000); // the first run has finished and been saved
+    const sentAt = Date.now();
+    child.kill(signal);
+    const code = await Promise.race([exited, new Promise<string>((r) => setTimeout(() => r("did not exit"), 20_000))]);
+
+    assert.equal(code, expectedExit, output);
+    assert.ok(Date.now() - sentAt < 15_000, "must exit promptly instead of finishing all 40 runs");
+    assert.match(output, /stopping and saving the results so far/);
+    assert.match(output, /PARTIAL RESULTS: \d+ of 40 planned runs completed/);
+    assert.match(output, /Results written to /);
+
+    const entries = await readdir(out);
+    assert.deepEqual(entries.filter((f) => f.endsWith(".tmp")), [], "no truncated temporary file");
+    const files = entries.filter((f) => f.endsWith(".json"));
+    assert.equal(files.length, 1);
+    const saved = JSON.parse(await readFile(path.join(out, files[0]!), "utf-8")) as EvalReport;
+    assert.equal(saved.partial, true);
+    assert.equal(saved.plannedRuns, 40);
+    const runs = saved.tasks[0]!.runs;
+    assert.ok(runs.length >= 1 && runs.length < 40, `${runs.length} runs saved`);
+    assert.ok(runs.every((r) => r.passed), "the unfinished run in flight is discarded, not recorded as a failure");
+  } finally {
+    child.kill("SIGKILL");
+    await model.close();
+  }
+}
+
+const posix = process.platform !== "win32";
+
+test("Ctrl+C stops the run, keeps what was measured, marks it partial, and exits 130", { skip: !posix, timeout: 120_000 }, async () => {
+  await interrupt("SIGINT", 130);
+});
+
+test("SIGTERM (docker stop) is handled the same way and exits 143", { skip: !posix, timeout: 120_000 }, async () => {
+  await interrupt("SIGTERM", 143);
 });

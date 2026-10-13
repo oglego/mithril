@@ -1,9 +1,9 @@
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, writeFile, rm, readFile } from "node:fs/promises";
+import { mkdtemp, writeFile, rm, readFile, readdir } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { summarizeReport, formatSummary, formatComparison, writeReport, loadReport, ReportError } from "./report.js";
+import { summarizeReport, formatSummary, formatComparison, writeReport, loadReport, reportFilePath, ReportError } from "./report.js";
 import { emptyMetrics } from "./runner.js";
 import type { EvalReport, FailureKind, RunResult } from "./types.js";
 
@@ -132,4 +132,40 @@ test("comparison lists tasks present on only one side", () => {
   const text = formatComparison(report("a", { shared: [1, 1], onlya: [1, 1] }), report("b", { shared: [1, 1], onlyb: [1, 1] }));
   assert.match(text, /Only in A: onlya/);
   assert.match(text, /Only in B: onlyb/);
+});
+
+test("a partial report says so prominently, with how much was completed", () => {
+  const text = formatSummary(report("x", { a: [2, 3], b: [1, 3] }, { partial: true, plannedRuns: 27 }));
+  assert.match(text, /^PARTIAL RESULTS: 6 of 27 planned runs completed\./);
+  assert.match(text, /Do not compare these with a finished run/);
+});
+
+test("a finished report carries no partial banner", () => {
+  assert.doesNotMatch(formatSummary(report("x", { a: [2, 3] })), /PARTIAL/);
+  assert.doesNotMatch(formatSummary(report("x", { a: [2, 3] }, { partial: false, plannedRuns: 3 })), /PARTIAL/);
+});
+
+test("comparing against a partial report warns which side is incomplete", () => {
+  const done = report("done", { a: [3, 3] });
+  const cut = report("cut", { a: [1, 1] }, { partial: true, plannedRuns: 9 });
+  assert.match(formatComparison(done, cut), /Warning: B is a partial result/);
+  assert.match(formatComparison(cut, done), /Warning: A is a partial result/);
+  assert.doesNotMatch(formatComparison(done, done), /partial/i);
+});
+
+test("saving repeatedly overwrites one file and leaves no temporary file behind", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "mithril-report-"));
+  scratch.push(dir);
+  const first = report("run", { a: [1, 1] }, { partial: true, plannedRuns: 3 });
+  const file1 = await writeReport(first, dir);
+  const second = report("run", { a: [2, 2] }, { partial: true, plannedRuns: 3 });
+  const file2 = await writeReport(second, dir);
+  const final = await writeReport(report("run", { a: [3, 3] }, { partial: false, plannedRuns: 3 }), dir);
+  assert.equal(file1, file2);
+  assert.equal(file2, final);
+  assert.equal(file1, reportFilePath(dir, first.startedAt, "run"));
+  assert.deepEqual(await readdir(dir), [path.basename(file1)], "exactly one file, no .tmp");
+  const saved = await loadReport(file1);
+  assert.equal(saved.partial, false);
+  assert.equal(saved.tasks[0]!.runs.length, 3, "the last save wins");
 });

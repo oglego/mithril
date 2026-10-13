@@ -120,9 +120,56 @@ test("checks reject cheats: hiding the symptom, rewriting the tests, partial ren
 });
 
 test("an answer task rejects a reply that gives the decoy answer", async () => {
-  const r = await attempt("answer-code-question", [], "The PORT variable, defaulting to 8080.");
-  assert.equal(r.passed, false);
-  assert.equal(r.failureKind, "wrong_answer");
+  await withModel(() => ({ content: "The PORT variable, defaulting to 8080." }), async (chatConfig) => {
+    const r = await runTask(byId("answer-code-question"), { chatConfig, contextWindow: WINDOW, run: 1 });
+    assert.equal(r.passed, false);
+    assert.equal(r.failureKind, "wrong_answer");
+    assert.equal(r.reply, "The PORT variable, defaulting to 8080.");
+  });
+});
+
+test("an empty final reply is reported as empty_reply, not as a wrong answer or a no-op", async () => {
+  for (const blank of ["", "   \n  "]) {
+    await withModel(() => ({ content: blank }), async (chatConfig) => {
+      for (const id of ["answer-code-question", "fix-off-by-one"]) {
+        const r = await runTask(byId(id), { chatConfig, contextWindow: WINDOW, run: 1 });
+        assert.equal(r.passed, false);
+        assert.equal(r.failureKind, "empty_reply", id);
+        assert.equal(r.stopReason, "answered");
+      }
+    });
+  }
+});
+
+test("an empty final reply does not hide a task that was actually solved", async () => {
+  const solve = oracleScript(tasks);
+  await withModel(
+    (ctx) => (ctx.messages[ctx.messages.length - 1]!.role === "tool" ? { content: "" } : solve(ctx)),
+    async (chatConfig) => {
+      const r = await runTask(byId("fix-off-by-one"), { chatConfig, contextWindow: WINDOW, run: 1 });
+      assert.equal(r.passed, true, "the check grades the outcome, not the final message");
+      assert.equal(r.failureKind, undefined);
+    }
+  );
+});
+
+test("a run can be aborted from outside, and says so", async () => {
+  await withModel(() => ({ content: "late", delayMs: 5000 }), async (chatConfig) => {
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(), 200);
+    const started = Date.now();
+    const r = await runTask(byId("fix-off-by-one"), { chatConfig, contextWindow: WINDOW, run: 1, signal: controller.signal });
+    assert.equal(r.stopReason, "aborted");
+    assert.ok(Date.now() - started < 3000, "must not wait for the slow response");
+  });
+  // Already aborted before the run starts: no model call is made.
+  await withModel(() => ({ content: "never" }), async (chatConfig, model) => {
+    const controller = new AbortController();
+    controller.abort();
+    const r = await runTask(byId("fix-off-by-one"), { chatConfig, contextWindow: WINDOW, run: 1, signal: controller.signal });
+    assert.equal(r.stopReason, "aborted");
+    assert.equal(model.calls(), 0);
+  });
 });
 
 // ---- measurement ----

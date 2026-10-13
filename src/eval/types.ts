@@ -21,6 +21,7 @@ export interface TaskSpec {
 }
 
 export type FailureKind =
+  | "empty_reply" // the model's final message was empty (so it neither answered nor finished a task)
   | "check_failed" // finished, changed files, but the check rejected the result
   | "no_changes" // finished without changing any file on an edit task
   | "wrong_answer" // answer task whose reply the check rejected
@@ -67,6 +68,10 @@ export interface RunResult {
 
 export interface EvalReport {
   schemaVersion: 1;
+  // True while a run is in progress or when it was interrupted: the results
+  // cover only plannedRuns' first runs. Absent/false means the run finished.
+  partial?: boolean;
+  plannedRuns?: number;
   label: string;
   startedAt: string;
   finishedAt: string;

@@ -2,13 +2,13 @@ import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { ConfigError, parseFlag, resolveBackend } from "../config.js";
-import { startBackend, installExitHandlers } from "../backend.js";
+import { startBackend, stopAll } from "../backend.js";
 import { buildSystemPrompt } from "../agent/system-prompt.js";
 import { ContextManager } from "../agent/context-manager.js";
 import { toolsToApiFormat } from "../agent/tools.js";
 import { buildEvalTools, runTask, verifyTask } from "./runner.js";
 import { TaskError, loadTasks, selectTasks } from "./tasks.js";
-import { ReportError, formatComparison, formatSummary, loadReport, writeReport } from "./report.js";
+import { ReportError, formatComparison, formatSummary, loadReport, reportFilePath, writeReport } from "./report.js";
 import type { EvalReport, RunResult, TaskSpec } from "./types.js";
 
 const BUILTIN_TASKS_DIR = fileURLToPath(new URL("../../eval-tasks", import.meta.url));
@@ -134,9 +134,13 @@ function fingerprint(system: string, defs: unknown): string {
 
 const kTokens = (n: number | null) => (n === null ? "n/a" : n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
 
-function runLine(r: RunResult): string {
+export function plural(n: number, word: string): string {
+  return `${n} ${word}${n === 1 ? "" : "s"}`;
+}
+
+export function runLine(r: RunResult): string {
   const m = r.metrics;
-  const stats = `${m.modelCalls} steps, ${m.toolCalls} tool calls, peak prompt ${kTokens(m.peakPromptTokens)}, ${(r.durationMs / 1000).toFixed(1)}s`;
+  const stats = `${plural(m.modelCalls, "step")}, ${plural(m.toolCalls, "tool call")}, peak prompt ${kTokens(m.peakPromptTokens)}, ${(r.durationMs / 1000).toFixed(1)}s`;
   return r.passed ? `PASS  (${stats})` : `FAIL  ${r.failureKind}  (${stats})`;
 }
 
@@ -147,68 +151,132 @@ export function checkInteractive(argv: string[], isTTY: boolean | undefined): vo
   }
 }
 
+interface InterruptState {
+  // Before the runs begin, Ctrl+C just quits. Once they are running it stops
+  // gracefully and saves what has been measured.
+  phase: "starting" | "running";
+  interrupted: boolean;
+  exitCode: number;
+  controller: AbortController;
+}
+
+// Ctrl+C (or `docker stop`) during a run must not throw away the results so
+// far. The first signal aborts the run in progress and lets the loop save and
+// print what it has; a second one quits immediately. Returns a function that
+// removes the handlers again.
+function installEvalSignalHandlers(state: InterruptState): () => void {
+  const handler = (code: number, name: string) => () => {
+    if (state.phase !== "running" || state.interrupted) {
+      stopAll();
+      process.exit(code);
+    }
+    state.interrupted = true;
+    state.exitCode = code;
+    process.stdout.write(`\nReceived ${name}: stopping and saving the results so far (send it again to quit immediately)...\n`);
+    state.controller.abort();
+  };
+  const onInt = handler(130, "SIGINT");
+  const onTerm = handler(143, "SIGTERM");
+  const onUncaught = (err: Error) => {
+    console.error(`mithril eval hit an unexpected error: ${err.message}`);
+    stopAll();
+    process.exit(1);
+  };
+  process.on("SIGINT", onInt);
+  process.on("SIGTERM", onTerm);
+  process.on("uncaughtException", onUncaught);
+  return () => {
+    process.off("SIGINT", onInt);
+    process.off("SIGTERM", onTerm);
+    process.off("uncaughtException", onUncaught);
+  };
+}
+
 async function runEvaluation(opts: EvalOptions, tasks: TaskSpec[], argv: string[]): Promise<number> {
   checkInteractive(argv, process.stdin.isTTY);
 
-  installExitHandlers();
-  console.log(
-    "Eval mode approves file edits automatically and runs the commands the model asks for (only the commands each\n" +
-      "task allows, no shell operators) inside a temporary copy of each task. That is an accident guard, not a\n" +
-      "sandbox: run evals in a container or VM if you don't trust the model.\n"
-  );
-  if (opts.runs === 1) console.log("Tip: models are not deterministic. Use --runs 3 or more for numbers you can rely on.\n");
+  const state: InterruptState = { phase: "starting", interrupted: false, exitCode: 130, controller: new AbortController() };
+  const removeHandlers = installEvalSignalHandlers(state);
+  try {
+    console.log(
+      "Eval mode approves file edits automatically and runs the commands the model asks for (only the commands each\n" +
+        "task allows, no shell operators) inside a temporary copy of each task. That is an accident guard, not a\n" +
+        "sandbox: run evals in a container or VM if you don't trust the model.\n"
+    );
+    if (opts.runs === 1) console.log("Tip: models are not deterministic. Use --runs 3 or more for numbers you can rely on.\n");
 
-  const startedAt = new Date().toISOString();
-  const { chatConfig, contextWindow } = await startBackend(argv);
+    const startedAt = new Date().toISOString();
+    const { chatConfig, contextWindow } = await startBackend(argv);
 
-  const evalTools = buildEvalTools(["node"]);
-  const system = buildSystemPrompt(evalTools);
-  const defs = toolsToApiFormat(evalTools);
-  const manager = new ContextManager({ contextWindow: contextWindow.window });
-  const fixed = manager.fixedPromptTokens([{ role: "system", content: system }], defs);
-  if (fixed > manager.maxInputTokens * 0.6) {
-    console.log(`Warning: the system prompt and tools use ~${fixed} tokens of a ${contextWindow.window}-token window; expect context failures.\n`);
-  }
-
-  const results = new Map<string, RunResult[]>();
-  console.log(`Running ${tasks.length} task(s) x ${opts.runs} run(s)...\n`);
-  for (const task of tasks) {
-    results.set(task.id, []);
-    for (let run = 1; run <= opts.runs; run++) {
-      process.stdout.write(`  ${task.id} [${run}/${opts.runs}] ... `);
-      const result = await runTask(task, {
-        chatConfig,
-        contextWindow: contextWindow.window,
-        temperature: opts.temperature,
-        run,
-        keepWorkdir: opts.keepWorkdirs,
-        transcripts: opts.transcripts,
-        onWorkdir: opts.keepWorkdirs ? (dir) => process.stdout.write(`(workdir ${dir}) `) : undefined,
-      });
-      results.get(task.id)!.push(result);
-      console.log(runLine(result));
+    const evalTools = buildEvalTools(["node"]);
+    const system = buildSystemPrompt(evalTools);
+    const defs = toolsToApiFormat(evalTools);
+    const manager = new ContextManager({ contextWindow: contextWindow.window });
+    const fixed = manager.fixedPromptTokens([{ role: "system", content: system }], defs);
+    if (fixed > manager.maxInputTokens * 0.6) {
+      console.log(`Warning: the system prompt and tools use ~${fixed} tokens of a ${contextWindow.window}-token window; expect context failures.\n`);
     }
+
+    const results = new Map<string, RunResult[]>(tasks.map((t) => [t.id, []]));
+    const plannedRuns = tasks.length * opts.runs;
+    const fingerprintValue = fingerprint(system, defs);
+
+    // Tasks that have not produced a run yet are left out, so a partial file
+    // only describes what was actually measured.
+    const build = (partial: boolean): EvalReport => ({
+      schemaVersion: 1,
+      partial,
+      plannedRuns,
+      label: opts.label,
+      startedAt,
+      finishedAt: new Date().toISOString(),
+      node: process.version,
+      backend: { baseUrl: chatConfig.baseUrl, model: chatConfig.model },
+      contextWindow: { window: contextWindow.window, source: contextWindow.source },
+      temperature: opts.temperature ?? null,
+      runsPerTask: opts.runs,
+      fixedOverheadTokens: fixed,
+      promptFingerprint: fingerprintValue,
+      tasks: tasks.filter((t) => results.get(t.id)!.length > 0).map((t) => ({ id: t.id, title: t.title, type: t.type, runs: results.get(t.id)! })),
+    });
+
+    console.log(`Running ${tasks.length} task(s) x ${opts.runs} run(s). Results are saved after every run:`);
+    console.log(`  ${reportFilePath(opts.outDir, startedAt, opts.label)}`);
+    console.log("Press Ctrl+C to stop early; what has been measured so far is kept.\n");
+
+    state.phase = "running";
+    outer: for (const task of tasks) {
+      for (let run = 1; run <= opts.runs; run++) {
+        if (state.interrupted) break outer;
+        process.stdout.write(`  ${task.id} [${run}/${opts.runs}] ... `);
+        const result = await runTask(task, {
+          chatConfig,
+          contextWindow: contextWindow.window,
+          temperature: opts.temperature,
+          run,
+          signal: state.controller.signal,
+          keepWorkdir: opts.keepWorkdirs,
+          transcripts: opts.transcripts,
+          onWorkdir: opts.keepWorkdirs ? (dir) => process.stdout.write(`(workdir ${dir}) `) : undefined,
+        });
+        if (state.interrupted && result.stopReason === "aborted") {
+          console.log("interrupted (this unfinished run is not counted)");
+          break outer;
+        }
+        results.get(task.id)!.push(result);
+        console.log(runLine(result));
+        await writeReport(build(true), opts.outDir);
+      }
+    }
+
+    const report = build(state.interrupted);
+    console.log("\n" + formatSummary(report));
+    const file = await writeReport(report, opts.outDir);
+    console.log(`\nResults written to ${file}`);
+    return state.interrupted ? state.exitCode : 0;
+  } finally {
+    removeHandlers();
   }
-
-  const report: EvalReport = {
-    schemaVersion: 1,
-    label: opts.label,
-    startedAt,
-    finishedAt: new Date().toISOString(),
-    node: process.version,
-    backend: { baseUrl: chatConfig.baseUrl, model: chatConfig.model },
-    contextWindow: { window: contextWindow.window, source: contextWindow.source },
-    temperature: opts.temperature ?? null,
-    runsPerTask: opts.runs,
-    fixedOverheadTokens: fixed,
-    promptFingerprint: fingerprint(system, defs),
-    tasks: tasks.map((t) => ({ id: t.id, title: t.title, type: t.type, runs: results.get(t.id)! })),
-  };
-
-  console.log("\n" + formatSummary(report));
-  const file = await writeReport(report, opts.outDir);
-  console.log(`\nResults written to ${file}`);
-  return 0;
 }
 
 // Returns the process exit code.

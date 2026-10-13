@@ -18,8 +18,6 @@ import type { Tool } from "./types.js";
 import { ContextManager } from "./agent/context-manager.js";
 import { describeWindow } from "./context-window.js";
 
-installExitHandlers();
-
 // `mithril eval ...` runs the evaluation harness instead of the chat app.
 if (process.argv[2] === "eval") {
   try {
@@ -33,6 +31,10 @@ if (process.argv[2] === "eval") {
     process.exit(1);
   }
 }
+
+// The chat app quits immediately on Ctrl+C. `mithril eval` installs its own
+// handlers instead, so that an interrupted run can save what it has measured.
+installExitHandlers();
 
 console.log(BANNER);
 p.intro("------------------------------------------------------------");

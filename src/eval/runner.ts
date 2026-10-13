@@ -78,7 +78,8 @@ export function emptyMetrics(): RunMetrics {
 export function classifyFailure(
   task: TaskSpec,
   stopReason: StopReason,
-  changed: string[]
+  changed: string[],
+  reply = "x"
 ): FailureKind {
   switch (stopReason) {
     case "aborted":
@@ -90,6 +91,10 @@ export function classifyFailure(
     case "server_error":
       return "server_error";
     case "answered":
+      // An empty final message is its own problem (small "thinking" models
+      // sometimes put everything in a separate reasoning field and leave the
+      // content blank); calling it a wrong answer would hide that.
+      if (reply.trim() === "") return "empty_reply";
       if (task.type === "answer") return "wrong_answer";
       return changed.length === 0 ? "no_changes" : "check_failed";
   }
@@ -101,6 +106,9 @@ export interface RunTaskOptions {
   temperature?: number | undefined;
   run: number;
   keepWorkdir?: boolean;
+  // Aborts the run from outside (e.g. Ctrl+C). The result then has stopReason
+  // "aborted" and is not a real failure of the model.
+  signal?: AbortSignal | undefined;
   // Which transcripts to keep in the result. Failures by default: they are
   // the ones you need to read, and transcripts can be large.
   transcripts?: "all" | "failed" | "none";
@@ -148,6 +156,9 @@ export async function runTask(task: TaskSpec, options: RunTaskOptions): Promise<
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), task.timeoutSeconds * 1000);
+  const abortFromOutside = () => controller.abort();
+  if (options.signal?.aborted) controller.abort();
+  else options.signal?.addEventListener("abort", abortFromOutside, { once: true });
   // Commands the agent runs inherit process.env (see executor.ts), so the
   // process-wide state is adjusted for the duration of the run and restored.
   const previousRoot = process.env.MITHRIL_PROJECT_ROOT;
@@ -169,6 +180,7 @@ export async function runTask(task: TaskSpec, options: RunTaskOptions): Promise<
     );
   } finally {
     clearTimeout(timer);
+    options.signal?.removeEventListener("abort", abortFromOutside);
     if (previousRoot === undefined) delete process.env.MITHRIL_PROJECT_ROOT;
     else process.env.MITHRIL_PROJECT_ROOT = previousRoot;
     for (const [key, value] of previousLeaky) {
@@ -194,7 +206,7 @@ export async function runTask(task: TaskSpec, options: RunTaskOptions): Promise<
       metrics,
       check,
     };
-    if (!check.passed) result.failureKind = classifyFailure(task, stopReason, changed);
+    if (!check.passed) result.failureKind = classifyFailure(task, stopReason, changed, reply);
 
     const keep = options.transcripts ?? "failed";
     if (keep === "all" || (keep === "failed" && !check.passed)) result.transcript = history;
