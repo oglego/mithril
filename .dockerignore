@@ -1,0 +1,9 @@
+# Keep the build context small and free of anything private. models/ holds
+# multi-GB llamafiles; eval-results/ holds earlier results.
+node_modules
+models
+eval-results
+.git
+.env
+.env.*
+*.log

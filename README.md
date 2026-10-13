@@ -192,7 +192,32 @@ npm run dev -- eval --compare eval-results/before.json eval-results/after.json
 
 **Tasks** live in `eval-tasks/`. Each is a directory with `task.json` (id, title, prompt, optional limits), a `fixture/` project, a `check.mjs` that grades the result, and a reference `solution/`. The check runs outside the project, so the agent can neither see nor edit it. `mithril eval --verify-tasks` proves every task is sound with no model: the untouched fixture must fail its check and the reference solution must pass. Point `--tasks <dir>` at your own directory to add tasks.
 
-**Safety:** eval mode approves file edits automatically and runs the commands the model asks for, inside a temporary copy of each task. Commands are limited to the task's allow-list (default: `node`) and may not contain shell operators. That is an accident guard, not a sandbox: an allowed `node` can still run any script the agent writes, and check scripts execute code the agent produced. Run evals in a container or VM for models you don't trust.
+**Safety:** eval mode approves file edits automatically and runs the commands the model asks for, inside a temporary copy of each task. Commands are limited to the task's allow-list (default: `node`) and may not contain shell operators. That is an accident guard, not a sandbox: an allowed `node` can still run any script the agent writes, and check scripts execute code the agent produced. For anything beyond a model you trust on your own machine, use the container setup below.
+
+### Running evals in a container
+
+`scripts/eval-docker.sh` runs the eval in a locked-down Docker container. Run the model server (Ollama, LM Studio, a llamafile, ...) outside the container; the container only runs the eval.
+
+```sh
+scripts/eval-docker.sh --base-url http://localhost:11434 --model qwen3:8b --runs 3
+```
+
+It builds the image the first time, then runs it with a read-only root filesystem, a small `/tmp` tmpfs for scratch projects, all Linux capabilities dropped, no privilege escalation, process, memory and CPU limits, and your own uid (it refuses to run as root). The only host directory mounted is the results directory, `./eval-results` by default. Every argument goes to `mithril eval`, with a few adjustments:
+
+- `--base-url http://localhost:...` is rewritten to `host.docker.internal`, because inside the container `localhost` is the container itself. Your server must then listen on a non-loopback address (for Ollama, `OLLAMA_HOST=0.0.0.0`).
+- `--tasks <dir>` is mounted read-only into the container.
+- `--out`, `--compare` and `--keep-workdirs` are refused with an explanation. Run `--compare` directly; it only reads files.
+
+Settings are environment variables, so they never clash with eval's own flags: `MITHRIL_EVAL_RESULTS`, `MITHRIL_EVAL_IMAGE`, `MITHRIL_EVAL_MEMORY` (default `1g`), `MITHRIL_EVAL_CPUS` (default `1`), `MITHRIL_EVAL_NETWORK`, `MITHRIL_EVAL_REBUILD=1`, and `MITHRIL_EVAL_DRY_RUN=1`, which prints the exact `docker` command instead of running it.
+
+What this does and does not protect against:
+
+- **Contained:** the agent can't modify the image or reach your files, and runaway or fork-bombing scripts hit the limits.
+- **Not contained: your host's ports.** `host.docker.internal` lets the container reach every port on your host, not only the model server. For a stronger setup, run the model server in its own container and put both on a Docker network created with `--internal` (no outside access), then set `MITHRIL_EVAL_NETWORK` and use the server's container name in `--base-url`. With a custom network the script neither rewrites the URL nor adds the host mapping.
+- **Not contained: API keys.** If `MITHRIL_API_KEY` or `OPENAI_API_KEY` is set, it is forwarded (by name, so the value never appears on a command line) and code the model writes could read it. A hosted model also needs internet access. Use a throwaway key with a spend limit.
+- **Containers share your host's kernel.** For models you really don't trust, use a throwaway VM.
+
+The container setup has been tested with a fake `docker` (the command line, build and run flow, exit codes, and that secrets never appear in output), but not yet against a real Docker daemon.
 
 ## Model catalog
 
