@@ -63,7 +63,10 @@ while [ $# -gt 0 ]; do
     --tasks)
       [ $# -ge 2 ] || die "--tasks needs a value."
       [ -d "$2" ] || die "--tasks directory not found: $2"
-      tasks_host="$(cd "$2" && pwd)"
+      # -P resolves symlinks. On macOS the temp dir (/var/folders/...) is a
+      # symlink to /private/var/folders/..., and the mount source should be the
+      # real path.
+      tasks_host="$(cd "$2" && pwd -P)"
       args+=(--tasks /tasks)
       shift 2 ;;
     --base-url)
