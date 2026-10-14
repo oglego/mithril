@@ -1,6 +1,7 @@
 import type { ChatMessage, Tool } from "../types.js";
 import { chatOnceWithUsage, type LlamaClientConfig } from "../client/llama-client.js";
 import { toolsToApiFormat } from "./tools.js";
+import { isDeclinedResult } from "./tool-results.js";
 import { capToolResult, suggestedWindowFor, type CompactionReport, type ContextManager } from "./context-manager.js";
 
 const DEFAULT_MAX_STEPS = 15; // Raised from 5 to allow multi-step coding workflows (search -> read -> edit -> test)
@@ -26,8 +27,8 @@ export interface AgentObserver {
   onStop?: (reason: StopReason) => void;
 }
 
-function classifyResult(result: string): ToolOutcome {
-  if (/declined by the user/i.test(result)) return "declined";
+function classifyResult(toolName: string, result: string): ToolOutcome {
+  if (isDeclinedResult(toolName, result)) return "declined";
   if (/^Error/.test(result)) return "tool_error";
   return "ok";
 }
@@ -134,7 +135,7 @@ export async function runAgentTurn(
 
         try {
           result = await tool.execute(args);
-          outcome = classifyResult(result);
+          outcome = classifyResult(call.function.name, result);
         } catch (err) {
           result = `Error running tool: ${(err as Error).message}`;
           outcome = "tool_exception";

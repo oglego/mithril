@@ -37,10 +37,54 @@ test("policy refuses other programs and anything that chains or redirects", () =
   for (const cmd of refused) assert.equal(checkCommand(cmd, ["node"]).allowed, false, JSON.stringify(cmd));
 });
 
-test("policy gives a reason, and honours a task's own allow-list", () => {
-  assert.match(checkCommand("npm test", ["node"]).reason ?? "", /not in this task's allowed commands/);
-  assert.match(checkCommand("node a; b", ["node"]).reason ?? "", /shell operators/);
+test("policy honours a task's own allow-list", () => {
   assert.equal(checkCommand("npm test", ["node", "npm"]).allowed, true);
+  assert.match(checkCommand("npm test", ["node"]).reason ?? "", /Allowed commands: node\./);
+  assert.match(checkCommand("python x.py", ["node", "npm"]).reason ?? "", /Allowed commands: node, npm\./);
+});
+
+// Refusals are returned to the MODEL as the result of its command, so each one
+// has to say what to do instead. Wording is checked loosely, but each message
+// must carry the specific guidance for its situation.
+test("refusing `cd` explains that the model is already in the project directory", () => {
+  for (const cmd of ["cd /testbed && node src/main.mjs", "cd /project", "cd src; node x.mjs"]) {
+    const d = checkCommand(cmd, ["node"]);
+    assert.equal(d.allowed, false, cmd);
+    assert.match(d.reason!, /already in the project directory/);
+    assert.match(d.reason!, /do not cd/);
+    assert.match(d.reason!, /node src\/main\.mjs/, "gives a runnable example");
+  }
+});
+
+test("refusing a file-reading command points at the file tools", () => {
+  for (const cmd of ["cat src/a.mjs", "ls -la", "pwd", "head -10 x", "grep -r foo .", "which node", "echo hi"]) {
+    const d = checkCommand(cmd, ["node"]);
+    assert.equal(d.allowed, false, cmd);
+    assert.match(d.reason!, /read_file, list_dir, find_files or search_code/, cmd);
+    assert.match(d.reason!, /not available here/);
+  }
+});
+
+test("refusing an unrelated program lists what is allowed, without suggesting file tools", () => {
+  const d = checkCommand("curl http://example.com", ["node"]);
+  assert.match(d.reason!, /"curl" is not available here\. Allowed commands: node\./);
+  assert.doesNotMatch(d.reason!, /read_file/);
+});
+
+test("refusing shell operators says to run one plain command, with an example", () => {
+  const d = checkCommand("node a.mjs 2>&1 | head -5", ["node"]);
+  assert.equal(d.allowed, false);
+  assert.match(d.reason!, /shell operators/);
+  assert.match(d.reason!, /one plain command at a time/);
+  assert.match(d.reason!, /node --test/);
+});
+
+test("a `cd` is reported as a cd problem even when it also contains operators", () => {
+  assert.match(checkCommand("cd /x && ls | cat", ["node"]).reason!, /do not cd/);
+});
+
+test("an empty command is refused with a reason", () => {
+  assert.match(checkCommand("   ", ["node"]).reason!, /empty/);
 });
 
 // ---- statistics ----

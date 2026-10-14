@@ -1,5 +1,6 @@
 import type { ApiToolDefinition, ChatMessage, ToolCall } from "../types.js";
 import { estimateMessageTokens } from "./context.js";
+import { isDeclinedResult } from "./tool-results.js";
 
 // The summary of dropped conversation lives at the END OF THE SYSTEM MESSAGE,
 // not in a mid-conversation message. Several chat templates (Mistral-style
@@ -204,7 +205,7 @@ function absorbBlock(state: SummaryState, block: Block): void {
     const args = parseArgs(call);
     const result = block.messages.find((m) => m.role === "tool" && m.tool_call_id === call.id)?.content ?? "";
     const name = call.function.name;
-    const declined = /declined by the user/i.test(result);
+    const declined = isDeclinedResult(name, result);
     const path = typeof args.path === "string" ? args.path : undefined;
 
     if ((name === "write_file" || name === "edit_file") && path) {

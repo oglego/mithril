@@ -35,7 +35,7 @@ function fixedOverhead(tools: Tool[]): { system: number; defs: number; total: nu
 // scarce and this overhead is paid on EVERY model call. This test is a budget:
 // if it fails, a change made the agent more expensive to run. Either slim the
 // change down, or raise the limit deliberately and say why in the commit.
-const FIXED_OVERHEAD_BUDGET_TOKENS = 900; // was ~1,570 before the slimming pass, now ~830
+const FIXED_OVERHEAD_BUDGET_TOKENS = 900; // was ~1,570 before the slimming pass; ~890 with the working-directory and edit_file wording
 
 test("fixed prompt overhead (system prompt + tool definitions) stays within budget", () => {
   const { system, defs, total } = fixedOverhead(fullToolset());
@@ -97,9 +97,36 @@ test("parameters whose meaning isn't obvious from their name stay documented", (
     ["run_command", "timeout_seconds"],
     ["search_code", "is_regex"],
     ["read_file", "start_line"],
+    ["edit_file", "replacement_content"],
   ];
   for (const [tool, param] of mustExplain) {
     const description = byName.get(tool)!.properties[param]?.description;
     assert.ok(description && description.length > 0, `${tool}.${param} should keep a description`);
   }
+});
+
+// Real runs of a 2B model showed it (a) assuming it started in /testbed or
+// /project and prefixing commands with `cd`, (b) using cat/ls instead of the
+// file tools, and (c) putting the NEW code in target_content. The wording that
+// addresses those is protected here so a later trimming pass can't quietly
+// remove it; any change should be re-measured with `mithril eval`.
+test("the prompt says where commands run and steers away from cd, absolute paths and shell file-reading", () => {
+  const prompt = buildSystemPrompt(fullToolset());
+  assert.match(prompt, /where commands run/);
+  assert.match(prompt, /never use absolute paths or cd/);
+  assert.match(prompt, /not cat, ls or grep/);
+});
+
+test("edit_file's schema says which field holds the old text and which the new", () => {
+  const edit = fullToolset().find((t) => t.name === "edit_file")!;
+  assert.match(edit.description, /target_content is the OLD text, replacement_content the NEW text/);
+  const props = (edit.parameters as { properties: Record<string, { description?: string }> }).properties;
+  assert.match(props.target_content!.description!, /existing text/i);
+  assert.match(props.target_content!.description!, /not the new text/i);
+  assert.match(props.replacement_content!.description!, /new text/i);
+});
+
+test("guidance about commands is omitted when there is no run_command tool", () => {
+  const prompt = buildSystemPrompt([readFileTool, searchCodeTool]);
+  assert.ok(!prompt.includes("run_command"));
 });

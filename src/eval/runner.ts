@@ -34,8 +34,9 @@ export function buildEvalTools(allowedCommands: string[], onDeclinedCommand?: (c
     confirm: async () => true,
     confirmCommand: async (command) => {
       const decision = checkCommand(command, allowedCommands);
-      if (!decision.allowed) onDeclinedCommand?.(command);
-      return decision.allowed;
+      if (decision.allowed) return true;
+      onDeclinedCommand?.(command);
+      return { approved: false, reason: decision.reason ?? "this command is not allowed." };
     },
   });
 }

@@ -5,6 +5,16 @@ export interface ReplacementResult {
   matchType?: "exact" | "whitespace_normalized";
 }
 
+// Errors from this function are returned to the model as the result of its
+// edit, and small models act on them literally. So each one says what is wrong
+// AND what to do next. Real runs showed a 2B model repeatedly putting the NEW
+// version of the code into target_content (the field for the existing text),
+// so these messages spell out which field is which and offer write_file as the
+// way to rewrite a whole file.
+const SWAP_HINT =
+  " replacement_content IS present in the file: check that you have not swapped the two fields " +
+  "(target_content is the OLD text to find, replacement_content is the NEW text).";
+
 export function applyReplacement(
   original: string,
   target: string,
@@ -12,8 +22,28 @@ export function applyReplacement(
   allowMultiple = false
 ): ReplacementResult {
   if (target.length === 0) {
-    return { success: false, error: 'target_content cannot be empty.' };
+    return {
+      success: false,
+      error:
+        "target_content cannot be empty. To edit, give a short snippet of the text currently in the file; " +
+        "to create a file or rewrite one completely, use write_file (overwrite=true for an existing file).",
+    };
   }
+
+  if (target === replacement) {
+    // Not an edit at all. Reporting success here would tell the model it had
+    // changed something when nothing changed.
+    return {
+      success: false,
+      error:
+        "target_content and replacement_content are identical, so nothing would change. " +
+        "target_content is the text currently in the file; replacement_content is the NEW text that should replace it.",
+    };
+  }
+
+  // Set when the model's replacement text already exists in the file, which
+  // strongly suggests it swapped the two fields.
+  const swapHint = replacement.length > 0 && original.includes(replacement) ? SWAP_HINT : "";
 
   // --- Level 1: Exact match ---
   let count = 0;
@@ -36,7 +66,7 @@ export function applyReplacement(
     }
     return {
       success: false,
-      error: `target_content was found ${count} times in the file. Please provide more surrounding lines to uniquely identify the section to replace.`,
+      error: `target_content was found ${count} times in the file. Add a few surrounding lines so it matches exactly once, or set allow_multiple=true to replace every match.`,
     };
   }
 
@@ -48,7 +78,11 @@ export function applyReplacement(
   if (targetLines.length > origLines.length) {
     return {
       success: false,
-      error: "target_content has more lines than the target file.",
+      error:
+        `target_content has ${targetLines.length} lines but the whole file has only ${origLines.length}. ` +
+        "target_content must be a short snippet of the text that is currently in the file, not the new version of the file. " +
+        "Put the new text in replacement_content, or use write_file with overwrite=true to rewrite the whole file." +
+        swapHint,
     };
   }
 
@@ -89,13 +123,17 @@ export function applyReplacement(
   if (matches.length > 1) {
     return {
       success: false,
-      error: `target_content matched ${matches.length} locations under whitespace-tolerant matching. Please provide more surrounding context.`,
+      error: `target_content matched ${matches.length} places even when ignoring indentation. Add a few surrounding lines so only one place matches.`,
     };
   }
 
   return {
     success: false,
-    error: "target_content not found in file. Use read_file to check the exact lines and formatting.",
+    error:
+      "target_content was not found in the file. It must be text that is already in the file, copied exactly from read_file " +
+      "(including indentation), and the new text belongs in replacement_content. " +
+      "Re-read the file and retry with a short snippet, or use write_file with overwrite=true to rewrite the whole file." +
+      swapHint,
   };
 }
 

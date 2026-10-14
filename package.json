@@ -7,7 +7,7 @@
     "node": ">=20.12.0"
   },
   "scripts": {
-    "test": "node --import tsx --test src/rag/chunker.test.ts src/rag/retriever.test.ts src/agent/tools.test.ts src/agent/context.test.ts src/agent/diff.test.ts src/agent/navigator.test.ts src/agent/executor.test.ts src/skills/loader.test.ts src/skills/skill-tool.test.ts src/config.test.ts src/client/llama-client.test.ts src/models/catalog-source.test.ts src/models/remote-setup.test.ts src/agent/context-manager.test.ts src/context-window.test.ts src/agent/agent-loop.test.ts src/agent/overhead.test.ts src/eval/runner.test.ts src/eval/units.test.ts src/eval/report.test.ts src/eval/cli.test.ts src/eval/docker.test.ts",
+    "test": "node --import tsx --test src/rag/chunker.test.ts src/rag/retriever.test.ts src/agent/tools.test.ts src/agent/context.test.ts src/agent/diff.test.ts src/agent/navigator.test.ts src/agent/executor.test.ts src/skills/loader.test.ts src/skills/skill-tool.test.ts src/config.test.ts src/client/llama-client.test.ts src/models/catalog-source.test.ts src/models/remote-setup.test.ts src/agent/context-manager.test.ts src/context-window.test.ts src/agent/agent-loop.test.ts src/agent/overhead.test.ts src/agent/tool-results.test.ts src/agent/file-editor.test.ts src/eval/runner.test.ts src/eval/units.test.ts src/eval/report.test.ts src/eval/cli.test.ts src/eval/docker.test.ts",
     "dev": "tsx src/index.ts",
     "build": "tsc --noEmit"
   },

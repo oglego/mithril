@@ -194,6 +194,13 @@ export function formatComparison(a: EvalReport, b: EvalReport): string {
 
   const oa = sa.overall, ob = sb.overall;
   const rateA = oa.passes / Math.max(1, oa.runs), rateB = ob.passes / Math.max(1, ob.runs);
+  const versionA = a.harnessVersion ?? 1, versionB = b.harnessVersion ?? 1;
+  if (versionA !== versionB) {
+    lines.push(
+      `Warning: A used harness version ${versionA} and B used ${versionB}. The environment the model worked in differed ` +
+        `(see src/eval/version.ts), so any difference mixes the effect of that with everything else you changed.`
+    );
+  }
   for (const [name, r] of [["A", a], ["B", b]] as const) {
     if (r.partial) lines.push(`Warning: ${name} is a partial result (the run did not finish), so its numbers are incomplete.`);
   }

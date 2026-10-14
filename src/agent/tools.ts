@@ -81,7 +81,15 @@ export interface DiffConfirmDetails {
 }
 
 export type DiffConfirmCallback = (details: DiffConfirmDetails) => Promise<boolean>;
-export type CommandConfirmCallback = (command: string) => Promise<boolean>;
+// A refusal that explains itself. Returned instead of `false` when the model
+// should be told WHY a command was not run, so it can correct course rather
+// than retry blindly.
+export interface CommandRefusal {
+  approved: false;
+  reason: string;
+}
+
+export type CommandConfirmCallback = (command: string) => Promise<boolean | CommandRefusal>;
 
 export interface ToolOptions {
   confirm?: DiffConfirmCallback;
@@ -294,13 +302,13 @@ export function createEditFileTool(options?: ToolOptions): Tool {
   return {
     name: "edit_file",
     description:
-      "Replace target_content with replacement_content in an existing file.",
+      "Replace a snippet of an existing file: target_content is the OLD text, replacement_content the NEW text.",
     parameters: {
       type: "object",
       properties: {
         path: { type: "string" },
-        target_content: { type: "string", description: "Exact text to find; must match exactly once." },
-        replacement_content: { type: "string" },
+        target_content: { type: "string", description: "The existing text to replace: a short snippet copied exactly from the file, not the new text." },
+        replacement_content: { type: "string", description: "The new text that replaces target_content." },
         allow_multiple: { type: "boolean", description: "Replace every match instead of requiring one." },
       },
       required: ["path", "target_content", "replacement_content"],
@@ -528,9 +536,11 @@ export function createRunCommandTool(options?: ToolOptions): Tool {
           : undefined;
 
       if (options?.confirmCommand) {
-        const approved = await options.confirmCommand(command.trim());
-        if (!approved) {
-          return "Command execution was declined by the user.";
+        const verdict = await options.confirmCommand(command.trim());
+        if (verdict !== true) {
+          return typeof verdict === "object" && verdict.reason
+            ? `Command was declined: ${verdict.reason}`
+            : "Command execution was declined by the user.";
         }
       }
 

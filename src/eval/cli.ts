@@ -8,6 +8,7 @@ import { ContextManager } from "../agent/context-manager.js";
 import { toolsToApiFormat } from "../agent/tools.js";
 import { buildEvalTools, runTask, verifyTask } from "./runner.js";
 import { TaskError, loadTasks, selectTasks } from "./tasks.js";
+import { HARNESS_VERSION } from "./version.js";
 import { ReportError, formatComparison, formatSummary, loadReport, reportFilePath, writeReport } from "./report.js";
 import type { EvalReport, RunResult, TaskSpec } from "./types.js";
 
@@ -225,6 +226,7 @@ async function runEvaluation(opts: EvalOptions, tasks: TaskSpec[], argv: string[
     // only describes what was actually measured.
     const build = (partial: boolean): EvalReport => ({
       schemaVersion: 1,
+      harnessVersion: HARNESS_VERSION,
       partial,
       plannedRuns,
       label: opts.label,

@@ -68,6 +68,8 @@ export interface RunResult {
 
 export interface EvalReport {
   schemaVersion: 1;
+  // See version.ts. Absent in files written before it existed (treated as 1).
+  harnessVersion?: number;
   // True while a run is in progress or when it was interrupted: the results
   // cover only plannedRuns' first runs. Absent/false means the run finished.
   partial?: boolean;

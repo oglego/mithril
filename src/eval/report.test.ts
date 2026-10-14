@@ -169,3 +169,13 @@ test("saving repeatedly overwrites one file and leaves no temporary file behind"
   assert.equal(saved.partial, false);
   assert.equal(saved.tasks[0]!.runs.length, 3, "the last save wins");
 });
+
+test("comparing results from different harness versions warns, treating a missing version as 1", () => {
+  const old = report("old", { a: [1, 1] });
+  delete old.harnessVersion;
+  const current = report("new", { a: [1, 1] }, { harnessVersion: 2 });
+  assert.match(formatComparison(old, current), /Warning: A used harness version 1 and B used 2/);
+  assert.match(formatComparison(current, old), /Warning: A used harness version 2 and B used 1/);
+  assert.doesNotMatch(formatComparison(current, report("same", { a: [1, 1] }, { harnessVersion: 2 })), /harness version/);
+  assert.doesNotMatch(formatComparison(old, report("old2", { a: [1, 1] })), /harness version/, "two unversioned files are both version 1");
+});

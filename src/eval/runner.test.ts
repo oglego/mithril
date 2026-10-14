@@ -271,6 +271,40 @@ test("checks do not inherit NODE_TEST_CONTEXT either", async () => {
   }
 });
 
+// ---- refusals explain themselves ----
+
+test("a refused command tells the model why and what to do instead", async () => {
+  const script = ({ call }: { call: number }): ScriptedReply => {
+    if (call === 1) return { toolCalls: [{ name: "run_command", arguments: { command: "cd /testbed && node src/main.mjs" } }] };
+    if (call === 2) return { toolCalls: [{ name: "run_command", arguments: { command: "cat src/paginate.mjs" } }] };
+    if (call === 3) return { toolCalls: [{ name: "run_command", arguments: { command: "node --test 2>&1 | head" } }] };
+    return { content: "ok" };
+  };
+  await withModel(script, async (chatConfig) => {
+    const r = await runTask(byId("fix-off-by-one"), { chatConfig, contextWindow: WINDOW, run: 1, transcripts: "all" });
+    assert.equal(r.metrics.outcomes.declined, 3);
+    const results = r.transcript!.filter((m) => m.role === "tool").map((m) => m.content);
+    assert.match(results[0]!, /^Command was declined: you are already in the project directory/);
+    assert.match(results[1]!, /read_file, list_dir, find_files or search_code/);
+    assert.match(results[2]!, /one plain command at a time/);
+    assert.ok(results.every((x) => !/declined by the user/.test(x)), "the model is not told a person declined it");
+  });
+});
+
+test("reading a file that contains the word 'declined' is not counted as a declined action", async () => {
+  const script = ({ call }: { call: number }): ScriptedReply => {
+    if (call === 1) return { toolCalls: [{ name: "write_file", arguments: { path: "notes.txt", content: "File write was declined by the user.\n" } }] };
+    if (call === 2) return { toolCalls: [{ name: "read_file", arguments: { path: "notes.txt" } }] };
+    if (call === 3) return { toolCalls: [{ name: "search_code", arguments: { query: "declined" } }] };
+    return { content: "ok" };
+  };
+  await withModel(script, async (chatConfig) => {
+    const r = await runTask(byId("fix-off-by-one"), { chatConfig, contextWindow: WINDOW, run: 1 });
+    assert.equal(r.metrics.outcomes.declined, 0);
+    assert.equal(r.metrics.outcomes.ok, 3);
+  });
+});
+
 // ---- failure modes ----
 
 test("a model that never finishes hits max_steps", async () => {
