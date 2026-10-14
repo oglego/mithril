@@ -25,7 +25,7 @@ The app is designed for a local-first workflow: choose a model from a catalog, d
 - Launches the model with `--server --port 8080 --no-webui --jinja`
 - Polls the server health endpoint until it is ready
 - Sends chat requests to the OpenAI-compatible `/v1/chat/completions` endpoint
-- Runs a tool-calling agent loop (non-streaming): the model can call local tools, see the results, and respond based on them
+- Runs a tool-calling agent loop with streamed output: answers appear as they are generated, and the model can call local tools, see the results, and respond based on them (see [Streaming](#streaming))
 - Coding tools: `read_file`, `list_dir`, `find_files`, `search_code` (read-only), plus `write_file`, `edit_file` and `run_command`, which always ask for confirmation first (diffs are shown for edits). `/undo` reverts the last edited file and `/diff` lists files modified this session
 - File tools are sandboxed to the project directory (including symlink checks); `.git`, `.env*` and `models/` are protected from writes
 - Bring your own backend: `--base-url` / `--model` point Mithril at any OpenAI-compatible server instead of a local llamafile (see below)
@@ -142,6 +142,18 @@ Mithril doesn't inject every skill's full content into context up front — only
 
 `--docs` and `--skills` can be combined, and compose onto the same tool list.
 
+## Streaming
+
+Answers are printed token by token as the model generates them, which matters most on slow local models. Tool calls are different: a tool call's arguments are JSON, and a fragment of JSON can't be run. So Mithril collects the whole call and only acts on it once the model has finished sending it. A response that is cut off partway through a tool call (a dropped connection, a crashed server) is reported as a server error and the half-received call is never executed.
+
+Details that matter with small models:
+
+- **Raw tool-call text is hidden.** Some models write a tool call as plain text (`<tool_call>{...}`) before the server converts it. The start of each response is held back for a moment, and if it looks like a tool call it is not printed.
+- **Reasoning is not part of the answer.** "Thinking" models that stream their reasoning separately (`reasoning_content`) show a "Reasoning..." status while they think; that text is never added to the conversation.
+- **Token usage is still tracked.** Mithril asks the server for usage in the final chunk (`stream_options.include_usage`) so context budgeting stays calibrated. Servers that don't send it stay on the estimate.
+- **Servers that ignore streaming work too.** If a server answers with a plain JSON body, the whole answer is shown at once.
+- **`--no-stream`** turns streaming off for a backend whose streaming or tool-call support is unreliable. `mithril eval` never streams, so measurements are unaffected.
+
 ## Context management
 
 Small models have small context windows, and coding sessions fill them fast (file reads and command output dominate). Mithril checks the prompt size before **every** model call, including each tool step inside a single turn, and compacts only as much as needed, cheapest measure first:
@@ -250,10 +262,10 @@ Models discovered this way haven't necessarily been tested with Mithril. The cur
 - `src/config.ts` — backend selection (local llamafile vs. remote OpenAI-compatible server) and flag/env parsing
 - `src/types.ts` — shared types used across the project
 - `src/repl.ts` — the interactive chat loop
-- `src/client/llama-client.ts` — HTTP client for chat (including server-reported token usage), streaming, and embeddings
+- `src/client/llama-client.ts` — HTTP client for chat (including server-reported token usage), streaming (with tool-call assembly), and embeddings
 - `src/llamafile/manager.ts` — launches and monitors a llamafile process
 - `src/models/` — model acquisition: `catalog.ts` (curated fallback list), `catalog-source.ts` (live discovery, caching, fallback), `remote-setup.ts` (the "Connect to a server…" flow), `embedding-model.ts`, `downloader.ts`, `onboarding.ts` (picker flow), `paths.ts`
-- `src/agent/` — `agent-loop.ts` (tool-calling loop), `tools.ts` (local tools, including `read_file`), `context-manager.ts` (keeps the prompt within the context window), `context.ts` (token estimation and the older simple trimmer)
+- `src/agent/` — `agent-loop.ts` (tool-calling loop), `tools.ts` (local tools, including `read_file`), `context-manager.ts` (keeps the prompt within the context window), `context.ts` (token estimation and the older simple trimmer), `stream-printer.ts` (hides raw tool-call text while streaming)
 - `src/backend.ts` — starts whichever chat backend was requested (shared by the chat app and `mithril eval`)
 - `src/eval/` — the evaluation harness (`cli.ts`, `runner.ts`, `tasks.ts`, `report.ts`, `policy.ts`, `stats.ts`); `eval-tasks/` holds the built-in tasks
 - `src/context-window.ts` — `--context` parsing, detecting the server's window, and defaults
@@ -278,7 +290,7 @@ The client sends requests to:
 http://localhost:8080/v1/chat/completions
 ```
 
-The REPL currently uses non-streaming requests, since tool-calling responses are validated and parsed as a whole before deciding whether to run a tool or show an answer. A separate streaming code path (`chatStream` in `src/client/llama-client.ts`) exists and is used for straightforward chat, but isn't yet wired into the tool-calling loop.
+The REPL streams by default (`stream: true`, with usage requested in the final chunk). Each model call is accumulated into one complete message before the loop decides whether to run a tool or show an answer, so the loop sees the same result either way. `--no-stream` and `mithril eval` use plain non-streaming requests.
 
 ## Project status
 

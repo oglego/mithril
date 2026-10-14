@@ -1,5 +1,5 @@
 import type { ChatMessage, Tool } from "../types.js";
-import { chatOnceWithUsage, type LlamaClientConfig } from "../client/llama-client.js";
+import { chatOnceWithUsage, chatStreamWithUsage, type LlamaClientConfig } from "../client/llama-client.js";
 import { toolsToApiFormat } from "./tools.js";
 import { isDeclinedResult } from "./tool-results.js";
 import { capToolResult, suggestedWindowFor, type CompactionReport, type ContextManager } from "./context-manager.js";
@@ -24,6 +24,12 @@ export interface AgentObserver {
     completionTokens?: number | undefined;
   }) => void;
   onToolResult?: (info: { name: string; outcome: ToolOutcome; result: string }) => void;
+  // Providing onToken switches model calls to streaming: answer text is
+  // reported as it arrives. Tool calls are still only acted on once complete.
+  onToken?: (text: string) => void;
+  // Reasoning ("thinking") text from models that stream it separately. It is
+  // never added to the conversation.
+  onReasoning?: (text: string) => void;
   onStop?: (reason: StopReason) => void;
 }
 
@@ -86,7 +92,12 @@ export async function runAgentTurn(
     let assistantMessage: ChatMessage;
     const callStarted = Date.now();
     try {
-      const { message, usage } = await chatOnceWithUsage(history, config, toolDefs);
+      const { message, usage } = observer?.onToken
+        ? await chatStreamWithUsage(history, config, toolDefs, {
+            onToken: observer.onToken,
+            onReasoning: observer.onReasoning,
+          })
+        : await chatOnceWithUsage(history, config, toolDefs);
       assistantMessage = message;
       context?.manager.observeUsage(usage.promptTokens);
       observer?.onModelCall?.({

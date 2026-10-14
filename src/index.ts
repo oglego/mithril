@@ -108,7 +108,7 @@ try {
     }
   }
 
-  await runRepl(chatConfig, tools, context);
+  await runRepl(chatConfig, tools, context, { stream: !argv.includes("--no-stream") });
 
   // Normal exit path (typed "exit", or Ctrl+C inside the chat prompt, which
   // clack intercepts as a cancel rather than a process-level SIGINT).

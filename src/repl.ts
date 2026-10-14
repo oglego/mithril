@@ -2,14 +2,46 @@ import { writeFile } from "node:fs/promises";
 import * as p from "@clack/prompts";
 import type { ChatMessage, Tool } from "./types.js";
 import type { LlamaClientConfig } from "./client/llama-client.js";
-import { runAgentTurn } from "./agent/agent-loop.js";
+import { runAgentTurn, type AgentObserver } from "./agent/agent-loop.js";
+import { createStreamPrinter, type StreamedCall } from "./agent/stream-printer.js";
 import { buildSystemPrompt } from "./agent/system-prompt.js";
 import { formatCompactionReport, suggestedWindowFor, type ContextManager } from "./agent/context-manager.js";
 import { withMutatingTools, toolsToApiFormat, type DiffConfirmDetails } from "./agent/tools.js";
 import { backupRegistry } from "./agent/file-editor.js";
 
-export async function runRepl(config: LlamaClientConfig, tools: Tool[], context: ContextManager): Promise<void> {
+export interface ReplOptions {
+  // Show answers as they are generated. On by default; `--no-stream` turns it
+  // off for backends whose streaming or tool-call support is unreliable.
+  stream?: boolean;
+}
+
+export async function runRepl(
+  config: LlamaClientConfig,
+  tools: Tool[],
+  context: ContextManager,
+  options: ReplOptions = {}
+): Promise<void> {
+  const stream = options.stream ?? true;
+  // The spinner only exists while we're waiting on something. It is cleared
+  // (set to null) while streamed text is being printed, and the confirmation
+  // hooks below only pause/resume it when it is running.
   let activeSpinner: ReturnType<typeof p.spinner> | null = null;
+
+  const startSpin = (message: string): void => {
+    if (activeSpinner) {
+      activeSpinner.message(message);
+      return;
+    }
+    activeSpinner = p.spinner();
+    activeSpinner.start(message);
+  };
+
+  const stopSpin = (message: string): void => {
+    if (!activeSpinner) return;
+    const spinner = activeSpinner;
+    activeSpinner = null;
+    spinner.stop(message);
+  };
 
   const confirmHook = async (details: DiffConfirmDetails): Promise<boolean> => {
     if (activeSpinner) {
@@ -118,39 +150,76 @@ export async function runRepl(config: LlamaClientConfig, tools: Tool[], context:
 
     history.push({ role: "user", content: userInput });
 
-    const spin = p.spinner();
-    activeSpinner = spin;
-    spin.start("Thinking...");
+    startSpin("Thinking...");
 
     // Compaction now happens inside the agent loop (before every model call).
     // Notices are collected and printed after the spinner stops, so they
     // don't garble the spinner line.
     const notices: string[] = [];
+
+    // Streaming: tokens are printed as they arrive. The spinner stops when
+    // the first one is shown and comes back for tool calls.
+    let headerShown = false;
+    let announcedReasoning = false;
+    const printer = createStreamPrinter((text) => {
+      stopSpin("");
+      if (!headerShown) {
+        process.stdout.write("\x1b[36m◆ mithril\x1b[0m\n");
+        headerShown = true;
+      }
+      process.stdout.write(text);
+    });
+    let lastCall: StreamedCall = { text: "", shown: false };
+
+    const endCall = (): void => {
+      lastCall = printer.finish();
+      if (lastCall.shown) process.stdout.write("\n");
+      headerShown = false;
+      announcedReasoning = false;
+    };
+
+    const observer: AgentObserver | undefined = stream
+      ? {
+          onToken: (token) => printer.push(token),
+          onReasoning: () => {
+            // Reasoning isn't shown; just tell the user the model is working.
+            if (!announcedReasoning) {
+              announcedReasoning = true;
+              if (activeSpinner) activeSpinner.message("Reasoning...");
+            }
+          },
+          onModelCall: endCall,
+        }
+      : undefined;
+
     const reply = await runAgentTurn(
       history,
       interactiveTools,
       config,
       (toolName) => {
-        spin.message(`Calling ${toolName}...`);
+        startSpin(`Calling ${toolName}...`);
       },
       undefined,
       {
         manager: context,
         onCompact: (report) => {
           notices.push(formatCompactionReport(report));
-          spin.message("Compacting context...");
+          startSpin("Compacting context...");
         },
-      }
+      },
+      observer
     );
 
-    spin.stop("Done.");
-    activeSpinner = null;
+    // A call that failed part-way never reports back; flush whatever it showed.
+    if (stream) endCall();
+    stopSpin("Done.");
     for (const notice of notices) p.log.info(notice);
 
-    // note() draws a titled, bordered panel — gives each reply a clear
-    // visual boundary in a scrolling transcript, instead of a plain line
-    // that blends into whatever came before it.
-    p.note(reply, "mithril");
+    // Streamed answers are already on screen. Everything else (non-streaming
+    // mode, stop messages, errors) goes in a titled, bordered panel — a clear
+    // visual boundary in a scrolling transcript.
+    const alreadyShown = lastCall.shown && lastCall.text.trim() === reply.trim();
+    if (!alreadyShown) p.note(reply, "mithril");
   }
 
   p.outro("Goodbye!");

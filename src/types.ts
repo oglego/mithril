@@ -1,11 +1,30 @@
+// One incremental tool-call fragment inside a streamed delta. Per the OpenAI
+// format, only the first fragment of a call carries `id` and `name`; `index`
+// says which call a fragment belongs to (parallel calls interleave by index).
+// Some servers omit `index`, and a few send `arguments` as an object.
+export interface StreamToolCallDelta {
+  index?: number;
+  id?: string;
+  type?: string;
+  function?: { name?: string; arguments?: string | Record<string, unknown> };
+}
+
 // The shape of one SSE chunk from llama-server's streaming response.
-// This is the type safety upgrade we flagged as a stretch goal last time.
 export interface StreamChunk {
-  choices: {
-    delta: {
-      content?: string;
+  choices?: {
+    delta?: {
+      content?: string | null;
+      // "Thinking" models put their reasoning here instead of in `content`.
+      reasoning_content?: string | null;
+      reasoning?: string | null;
+      tool_calls?: StreamToolCallDelta[];
     };
+    finish_reason?: string | null;
   }[];
+  // Final chunk when `stream_options.include_usage` is honored (choices is []).
+  usage?: { prompt_tokens?: unknown; completion_tokens?: unknown } | null;
+  // Some servers report a failure as a data event instead of an HTTP status.
+  error?: string | { message?: string } | null;
 }
 
 export interface ToolCall {
