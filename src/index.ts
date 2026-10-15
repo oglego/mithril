@@ -32,6 +32,17 @@ if (process.argv[2] === "eval") {
   }
 }
 
+// `mithril -p "<prompt>"` runs one task with no prompts and exits (see
+// headless.ts). It must run before the banner and intro below: stdout is
+// reserved for the answer.
+if (process.argv.slice(2).some((arg) => arg === "-p" || arg === "--print")) {
+  const { runHeadless } = await import("./headless.js");
+  const code = await runHeadless(process.argv.slice(2));
+  // Let piped stdout finish flushing before exiting, or a large answer can be cut off.
+  await new Promise<void>((resolve) => process.stdout.write("", () => resolve()));
+  process.exit(code);
+}
+
 // The chat app quits immediately on Ctrl+C. `mithril eval` installs its own
 // handlers instead, so that an interrupted run can save what it has measured.
 installExitHandlers();

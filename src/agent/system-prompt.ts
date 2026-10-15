@@ -9,7 +9,7 @@ import type { Tool } from "../types.js";
 // into the prompt; listing them again just paid for each description twice.
 // Guidance below is included only for tools that are actually present, so the
 // prompt stays accurate when tools are added or removed (e.g. --docs).
-export function buildSystemPrompt(tools: Tool[]): string {
+export function buildSystemPrompt(tools: Tool[], options: { headless?: boolean } = {}): string {
   const has = (name: string) => tools.some((t) => t.name === name);
   const lines: string[] = [
     "You are Mithril, a coding assistant running locally on the user's machine. Be direct and concise.",
@@ -40,6 +40,11 @@ export function buildSystemPrompt(tools: Tool[]): string {
     );
   }
   lines.push("- After using a tool, briefly say what you found or changed.");
+  if (options.headless) {
+    // Small models love to end with "Would you like me to...?". In a
+    // non-interactive run nobody can answer, so the task would just stop there.
+    lines.push("- This run is non-interactive and nobody can answer questions: make reasonable assumptions, finish the task, and end with a short summary of the result.");
+  }
 
   return lines.join("\n");
 }

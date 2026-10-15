@@ -154,6 +154,44 @@ Details that matter with small models:
 - **Servers that ignore streaming work too.** If a server answers with a plain JSON body, the whole answer is shown at once.
 - **`--no-stream`** turns streaming off for a backend whose streaming or tool-call support is unreliable. `mithril eval` never streams, so measurements are unaffected.
 
+## Headless mode (`mithril -p`)
+
+`mithril -p "<prompt>"` runs one task with no prompts and exits, for scripts, CI and benchmarking. It talks to a model server that is already running, so it needs `--base-url` and `--model` (or `MITHRIL_BASE_URL` and `MITHRIL_MODEL`); it never opens the model picker.
+
+```sh
+mithril -p "Summarize what src/ does" --base-url http://localhost:11434 --model qwen3:4b
+git diff | mithril -p "Review this diff for bugs" --base-url ... --model ...
+mithril -p "Fix the failing test" --allow-write --allow-command node,npm --timeout 600 --base-url ... --model ...
+```
+
+**Read-only by default.** What you don't allow is not even offered to the model, so it doesn't waste steps on tools that can only fail.
+
+- `--allow-write` lets the agent create and edit files in the project.
+- `--allow-command node,npm` lets it run those programs. Give program names only, not whole commands. Chaining, pipes, redirection and `cd` are refused, with a message telling the model what to do instead. This is an **accident guard, not a sandbox**: an allowed `node` can still run any script it can run. For untrusted models, run inside a container.
+- There is deliberately no "allow everything" flag.
+- `MITHRIL_API_KEY` and `OPENAI_API_KEY` are removed from the environment of the commands the agent runs. The model server still gets them.
+
+**Output.** The answer is the only thing on stdout; warnings and `--verbose` tool-call logging go to stderr, so it is safe to pipe. On failure stdout stays empty, so `answer=$(mithril -p ...)` never captures an error message as an answer. With `--output-format json` you get one object instead:
+
+```json
+{"ok":true,"result":"...","stop_reason":"answered","model":"qwen3:4b","duration_ms":8120,
+ "model_calls":3,"tool_calls":{"total":2,"by_name":{"read_file":2},"outcomes":{"ok":2}},
+ "usage":{"prompt_tokens":2310,"completion_tokens":180},"files_changed":[]}
+```
+
+On failure it has `"ok":false` and an `"error"` instead of `"result"`. `usage` values are `null` when the server doesn't report them, and `files_changed` lists files the agent successfully wrote or edited.
+
+| Exit code | Meaning |
+|---|---|
+| 0 | answered |
+| 1 | failed (server error, or the request no longer fits the context window) |
+| 2 | usage or configuration error; nothing was run |
+| 3 | ran out of steps (`--max-steps`, default 15) |
+| 124 | timed out (`--timeout <seconds>`; no limit by default) |
+| 130 | interrupted (Ctrl+C) |
+
+The prompt can also be piped in: use `-p` with no value, or `-p -`. Other options: `--context`, `--temperature` (use 0 for repeatable runs), `--skills <dir>`, `--verbose`. Run `mithril -p --help` for the full list. Unknown flags are errors rather than being ignored, because nobody is watching a headless run. `--docs` is not supported yet.
+
 ## Context management
 
 Small models have small context windows, and coding sessions fill them fast (file reads and command output dominate). Mithril checks the prompt size before **every** model call, including each tool step inside a single turn, and compacts only as much as needed, cheapest measure first:
@@ -262,6 +300,7 @@ Models discovered this way haven't necessarily been tested with Mithril. The cur
 - `src/config.ts` — backend selection (local llamafile vs. remote OpenAI-compatible server) and flag/env parsing
 - `src/types.ts` — shared types used across the project
 - `src/repl.ts` — the interactive chat loop
+- `src/headless.ts` — `mithril -p`: argument parsing, permissions, JSON output and exit codes
 - `src/client/llama-client.ts` — HTTP client for chat (including server-reported token usage), streaming (with tool-call assembly), and embeddings
 - `src/llamafile/manager.ts` — launches and monitors a llamafile process
 - `src/models/` — model acquisition: `catalog.ts` (curated fallback list), `catalog-source.ts` (live discovery, caching, fallback), `remote-setup.ts` (the "Connect to a server…" flow), `embedding-model.ts`, `downloader.ts`, `onboarding.ts` (picker flow), `paths.ts`
