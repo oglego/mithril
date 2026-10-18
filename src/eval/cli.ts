@@ -17,7 +17,7 @@ const BUILTIN_TASKS_DIR = fileURLToPath(new URL("../../eval-tasks", import.meta.
 const VALUE_FLAGS = new Set([
   "--tasks", "--task", "--runs", "--out", "--label", "--temperature", "--transcripts",
   // handled by the shared backend code
-  "--base-url", "--model", "--context", "--api-key",
+  "--base-url", "--model", "--context", "--api-key", "--llamafile", "--port",
 ]);
 const BOOLEAN_FLAGS = new Set(["--list", "--verify-tasks", "--keep-workdirs", "--help"]);
 
@@ -26,6 +26,7 @@ export const HELP = `Usage: mithril eval [options]
 Runs coding tasks against a model and reports how many it completes.
 
 Model (same as the chat app; with none of these, the model picker opens):
+  --llamafile <path>              start this llamafile (--port <n> sets its port, default 8080)
   --base-url <url> --model <id>   use a server that is already running
   --context <tokens>              context window size (see the README)
   --temperature <0-2>             sampling temperature (default: the server's)

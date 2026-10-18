@@ -1,5 +1,6 @@
 import path from "node:path";
-import { ConfigError, parseFlag, parsePathFlag, probeBackend, resolveBackend } from "./config.js";
+import { launchLlamafile, stopAll } from "./backend.js";
+import { ConfigError, parseFlag, parsePathFlag, parsePortFlag, probeBackend, resolveBackend } from "./config.js";
 import { describeWindow, parseContextFlag, resolveContextWindow } from "./context-window.js";
 import { runAgentTurn, type AgentObserver, type StopReason, type ToolOutcome } from "./agent/agent-loop.js";
 import { buildSystemPrompt } from "./agent/system-prompt.js";
@@ -34,13 +35,15 @@ export function exitCodeFor(reason: StopReason, timedOut: boolean): number {
   }
 }
 
-export const HEADLESS_HELP = `Usage: mithril -p "<prompt>" --base-url <url> --model <id> [options]
+export const HEADLESS_HELP = `Usage: mithril -p "<prompt>" (--llamafile <path> | --base-url <url> --model <id>) [options]
 
 Runs one task without any prompts and exits. The answer goes to stdout;
 progress and warnings go to stderr, so the output is safe to pipe.
 
 Model (required; headless mode never opens the model picker):
-  --base-url <url> --model <id>   a server that is already running
+  --llamafile <path>              start this llamafile for the run and stop it afterwards
+  --port <n>                      the port for --llamafile (default 8080)
+  --base-url <url> --model <id>   or use a server that is already running
                                   (or set MITHRIL_BASE_URL and MITHRIL_MODEL)
   --context <tokens>              context window size
   --temperature <0-2>             sampling temperature (use 0 for repeatable runs)
@@ -83,7 +86,7 @@ export interface HeadlessOptions {
 const VALUE_FLAGS = new Set([
   "--output-format", "--allow-command", "--max-steps", "--timeout", "--skills", "--temperature",
   // read by the shared config code (parseFlag / resolveBackend / parseContextFlag)
-  "--base-url", "--model", "--context", "--api-key",
+  "--base-url", "--model", "--context", "--api-key", "--llamafile", "--port",
 ]);
 const BOOLEAN_FLAGS = new Set(["--allow-write", "--verbose", "--help", "-h"]);
 const UNSUPPORTED = new Map([["--docs", "--docs is not supported in headless mode yet."]]);
@@ -281,6 +284,12 @@ export function formatJson(s: Summary): string {
   );
 }
 
+// Ctrl+C while a llamafile is still starting: there is nothing to finish
+// cleanly yet, so just leave (the exit hook stops the model server).
+function onStartupInterrupt(): never {
+  process.exit(EXIT.INTERRUPTED);
+}
+
 // Runs one prompt and returns the process exit code. Never calls
 // process.exit and never prints outside `io`, so it can be tested.
 export async function runHeadless(argv: string[], io: HeadlessIO = processIO()): Promise<number> {
@@ -314,17 +323,38 @@ export async function runHeadless(argv: string[], io: HeadlessIO = processIO()):
     if (prompt.trim() === "") throw new ConfigError("The prompt is empty.");
 
     const backend = resolveBackend(argv, io.env);
-    if (backend.kind !== "remote") {
+    if (backend.kind === "local") {
       throw new ConfigError(
-        "Headless mode needs a model server that is already running. " +
-          "Pass --base-url and --model (or set MITHRIL_BASE_URL and MITHRIL_MODEL)."
+        "Headless mode needs a model. Pass --llamafile <path>, or --base-url and --model " +
+          "(or MITHRIL_BASE_URL and MITHRIL_MODEL) for a server that is already running."
       );
     }
     const contextFlag = parseContextFlag(argv, io.env);
-    const contextWindow = resolveContextWindow({ flag: contextFlag, kind: "remote" });
 
-    const warning = await probeBackend(backend.baseUrl, backend.apiKey);
-    if (warning) io.err(`mithril: warning: ${warning}\n`);
+    let target: { baseUrl: string; model: string; apiKey?: string | undefined };
+    let contextWindow: ReturnType<typeof resolveContextWindow>;
+    if (backend.kind === "remote") {
+      target = { baseUrl: backend.baseUrl, model: backend.model, apiKey: backend.apiKey };
+      contextWindow = resolveContextWindow({ flag: contextFlag, kind: "remote" });
+      const warning = await probeBackend(backend.baseUrl, backend.apiKey);
+      if (warning) io.err(`mithril: warning: ${warning}\n`);
+    } else {
+      // The llamafile is a child process, so it must be stopped on every way
+      // out: normally (the finally below), on Ctrl+C while it is starting, and
+      // on a second Ctrl+C or any process.exit during the run (the exit hook).
+      process.once("exit", stopAll);
+      process.once("SIGINT", onStartupInterrupt);
+      const started = await launchLlamafile({
+        binaryPath: backend.path,
+        modelId: path.basename(backend.path),
+        port: parsePortFlag(argv),
+        contextFlag,
+        onStatus: (message) => io.err(`mithril: ${message}\n`),
+      });
+      process.off("SIGINT", onStartupInterrupt);
+      target = started.chatConfig;
+      contextWindow = started.contextWindow;
+    }
     if (opts.verbose) io.err(`mithril: ${describeWindow(contextWindow)}\n`);
 
     const tracker = newFileTracker();
@@ -400,7 +430,7 @@ export async function runHeadless(argv: string[], io: HeadlessIO = processIO()):
       reply = await runAgentTurn(
         history,
         tools,
-        { baseUrl: backend.baseUrl, model: backend.model, apiKey: backend.apiKey, temperature: opts.temperature, signal: controller.signal },
+        { baseUrl: target.baseUrl, model: target.model, apiKey: target.apiKey, temperature: opts.temperature, signal: controller.signal },
         opts.verbose ? (name) => io.err(`mithril: calling ${name}\n`) : undefined,
         opts.maxSteps,
         {
@@ -430,7 +460,7 @@ export async function runHeadless(argv: string[], io: HeadlessIO = processIO()):
           ok,
           text: message,
           stopReason,
-          model: backend.model,
+          model: target.model,
           durationMs: Date.now() - started,
           modelCalls,
           toolCalls,
@@ -452,5 +482,10 @@ export async function runHeadless(argv: string[], io: HeadlessIO = processIO()):
   } catch (err) {
     if (err instanceof ConfigError) return fail(err.message, EXIT.USAGE);
     return fail(`failed: ${(err as Error).message}`, EXIT.FAILED);
+  } finally {
+    // A llamafile started for this run goes away with it, whatever happened.
+    process.off("exit", stopAll);
+    process.off("SIGINT", onStartupInterrupt);
+    stopAll();
   }
 }

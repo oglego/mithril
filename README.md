@@ -16,6 +16,18 @@ Mithril is a small TypeScript command-line coding assistant. By default it downl
 
 The app is designed for a local-first workflow: choose a model from a catalog, download it if it is not already present, launch the model server, and open an agent loop without needing a separate hosted AI service.
 
+## Scope
+
+Mithril is meant to stay small: a coding harness for small models running locally in a llamafile, simple enough to read in an afternoon. To see how big it is right now: `find src -name '*.ts' -not -name '*.test.ts' | xargs wc -l`.
+
+What it is for:
+
+- **A model you run yourself.** It starts a llamafile for you (or talks to a server you already run) and works within a small context window instead of assuming a huge one.
+- **Safe by default.** File tools stay inside the project, and anything that writes or runs a command asks first. Headless mode is read-only unless you allow more.
+- **Measurable.** `mithril eval` turns "works on a small model" into a number, so changes to the prompt or tools can be checked instead of guessed at.
+
+What it is not, on purpose: a replacement for larger agent harnesses such as Pi or Claude Code. There is no plugin or extension system, no full-screen terminal UI, no saved sessions, and no login flows for hosted providers beyond an API key in the environment. If you need those, use a tool built for them.
+
 ## Features
 
 - ASCII-art banner on launch, followed by interactive model selection (`@clack/prompts`)
@@ -28,7 +40,7 @@ The app is designed for a local-first workflow: choose a model from a catalog, d
 - Runs a tool-calling agent loop with streamed output: answers appear as they are generated, and the model can call local tools, see the results, and respond based on them (see [Streaming](#streaming))
 - Coding tools: `read_file`, `list_dir`, `find_files`, `search_code` (read-only), plus `write_file`, `edit_file` and `run_command`, which always ask for confirmation first (diffs are shown for edits). `/undo` reverts the last edited file and `/diff` lists files modified this session
 - File tools are sandboxed to the project directory (including symlink checks); `.git`, `.env*` and `models/` are protected from writes
-- Bring your own backend: `--base-url` / `--model` point Mithril at any OpenAI-compatible server instead of a local llamafile (see below)
+- Bring your own backend: `--base-url` / `--model` point Mithril at any OpenAI-compatible server instead of a local llamafile (see below), or `--llamafile <path>` starts a llamafile you already have with no picker
 - Context management: the prompt is kept within the model's context window before every model call, by trimming old tool results and condensing old conversation into a short summary instead of silently forgetting it (see [Context management](#context-management))
 - Optional RAG over a folder of markdown notes (`--docs <path>`): indexes the folder with a dedicated embedding model and exposes a `search_docs` tool the model can call on demand
 - Optional skills support (`--skills <path>`): loads `SKILL.md` files compatible with the Claude Code / Codex / community skills convention (e.g. [mattpocock/skills](https://github.com/mattpocock/skills)), exposed as a `load_skill` tool the model calls on demand
@@ -48,6 +60,14 @@ Install dependencies:
 npm install
 ```
 
+To get a `mithril` command on your PATH, run this once from the project directory:
+
+```sh
+npm link
+```
+
+After that, `mithril <flags>` and `npm run dev -- <flags>` are the same thing, and the examples below use either. (`npm run dev` always works without linking.)
+
 ## Run
 
 Start the app:
@@ -66,6 +86,17 @@ The first run will:
 Type a message and press Enter. A spinner shows while the model is thinking, updating to show tool activity (e.g. "Calling search_docs...") if the model uses one along the way. The reply appears in a bordered panel once ready. Type `exit` or press Ctrl+C to quit.
 
 Server logs from llamafile itself are written to `mithril.log`, not the terminal, to keep the chat output clean.
+
+### Using a llamafile you already have
+
+```sh
+mithril --llamafile ./models/Qwen3.5-2B-Q8_0.llamafile
+mithril --llamafile ./models/Qwen3.5-2B-Q8_0.llamafile --context 8192 --port 8081
+```
+
+This skips the picker and the download. Mithril starts the file the same way it starts a catalog model (`--server --jinja --no-webui`, plus `-c <tokens>` if you pass `--context`), waits until it is ready, and stops it when you exit. The model name sent to the server is the file name. The server uses port 8080 unless you pass `--port`; if that port is taken you get a clear error instead of a connection to someone else's server.
+
+`--llamafile` can't be combined with `--base-url` or `--model`, since those point at a server that is already running. It also works with headless mode and `mithril eval`.
 
 ### Using a different backend (Ollama, LM Studio, OpenAI, ...)
 
@@ -156,9 +187,10 @@ Details that matter with small models:
 
 ## Headless mode (`mithril -p`)
 
-`mithril -p "<prompt>"` runs one task with no prompts and exits, for scripts, CI and benchmarking. It talks to a model server that is already running, so it needs `--base-url` and `--model` (or `MITHRIL_BASE_URL` and `MITHRIL_MODEL`); it never opens the model picker.
+`mithril -p "<prompt>"` runs one task with no prompts and exits, for scripts, CI and benchmarking. It needs a model: `--llamafile <path>` starts one for the run and stops it afterwards (`--port` picks its port), or `--base-url` and `--model` (or `MITHRIL_BASE_URL` and `MITHRIL_MODEL`) use a server that is already running. It never opens the model picker.
 
 ```sh
+mithril -p "Summarize what src/ does" --llamafile ./models/Qwen3.5-2B-Q8_0.llamafile
 mithril -p "Summarize what src/ does" --base-url http://localhost:11434 --model qwen3:4b
 git diff | mithril -p "Review this diff for bugs" --base-url ... --model ...
 mithril -p "Fix the failing test" --allow-write --allow-command node,npm --timeout 600 --base-url ... --model ...
@@ -225,6 +257,9 @@ Things to know:
 ```sh
 # Pick a model interactively (local llamafile or a server), run every task 3 times
 npm run dev -- eval --runs 3 --label baseline
+
+# A llamafile you already have
+npm run dev -- eval --llamafile ./models/Qwen3.5-2B-Q8_0.llamafile --runs 3
 
 # Against a server that is already running
 npm run dev -- eval --base-url http://localhost:11434 --model qwen3:8b --runs 3

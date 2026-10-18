@@ -5,7 +5,11 @@ import path from "node:path";
 // at any OpenAI-compatible server that is already running — Ollama,
 // LM Studio, llama-server, vLLM, OpenRouter, OpenAI, etc.
 export type BackendConfig =
+  // No flags: the interactive picker chooses (or downloads) a model.
   | { kind: "local" }
+  // --llamafile <path>: Mithril starts this llamafile itself, with no picker.
+  | { kind: "llamafile"; path: string }
+  // --base-url/--model: an OpenAI-compatible server that is already running.
   | { kind: "remote"; baseUrl: string; model: string; apiKey?: string | undefined };
 
 export class ConfigError extends Error {}
@@ -21,6 +25,19 @@ export function parseFlag(argv: string[], flag: string): string | undefined {
 export function parsePathFlag(argv: string[], flag: string): string | undefined {
   const value = parseFlag(argv, flag);
   return value ? path.resolve(value) : undefined;
+}
+
+// The port Mithril starts a llamafile on, unless --port says otherwise.
+export const DEFAULT_LLAMAFILE_PORT = 8080;
+
+export function parsePortFlag(argv: string[]): number {
+  if (!argv.includes("--port")) return DEFAULT_LLAMAFILE_PORT;
+  const raw = parseFlag(argv, "--port");
+  const port = Number(raw);
+  if (raw === undefined || !Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new ConfigError(`--port must be a whole number from 1 to 65535 (got ${raw === undefined ? "nothing" : `"${raw}"`}).`);
+  }
+  return port;
 }
 
 // The client appends "/v1/chat/completions" itself, but most hosted
@@ -45,6 +62,8 @@ export function normalizeBaseUrl(raw: string): string {
 //
 //   --base-url <url>   use a remote/already-running OpenAI-compatible server
 //   --model <id>       model name to send (required with --base-url)
+//   --llamafile <path> start this llamafile as the model server (no picker);
+//                      --port <n> chooses its port (default 8080)
 //
 // The API key is deliberately NOT a CLI flag: command-line arguments end up
 // in shell history and `ps` output. It's read from MITHRIL_API_KEY, falling
@@ -60,8 +79,25 @@ export function resolveBackend(
     );
   }
 
+  parsePortFlag(argv); // validated up front, before anything is downloaded or started
+
+  if (argv.includes("--llamafile")) {
+    const file = parsePathFlag(argv, "--llamafile");
+    if (!file) throw new ConfigError("--llamafile needs the path to a .llamafile.");
+    // Only the flags count here: an exported MITHRIL_BASE_URL must not stop
+    // someone from pointing at a file on one command.
+    if (argv.includes("--base-url") || argv.includes("--model")) {
+      throw new ConfigError("--llamafile starts its own server, so it can't be combined with --base-url or --model.");
+    }
+    return { kind: "llamafile", path: file };
+  }
+
   const rawBaseUrl = parseFlag(argv, "--base-url") ?? env.MITHRIL_BASE_URL;
   const model = parseFlag(argv, "--model") ?? env.MITHRIL_MODEL;
+
+  if (rawBaseUrl && argv.includes("--port")) {
+    throw new ConfigError(`--port only applies when Mithril starts the model itself (the picker or --llamafile); it can't change where ${rawBaseUrl} listens.`);
+  }
 
   if (!rawBaseUrl) {
     // --model alone is ambiguous in local mode (the picker chooses the model).

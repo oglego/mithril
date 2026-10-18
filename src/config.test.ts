@@ -2,7 +2,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
-import { resolveBackend, normalizeBaseUrl, parseFlag, probeBackend, ConfigError } from "./config.js";
+import path from "node:path";
+import { resolveBackend, normalizeBaseUrl, parseFlag, parsePortFlag, probeBackend, ConfigError } from "./config.js";
 
 test("defaults to local mode with no flags", () => {
   assert.deepEqual(resolveBackend([], {}), { kind: "local" });
@@ -78,4 +79,51 @@ test("probeBackend returns null for a reachable server and warns on 401", async 
 test("probeBackend warns instead of throwing when nothing is listening", async () => {
   const warning = await probeBackend("http://127.0.0.1:1", undefined, 1000);
   assert.match(warning ?? "", /Could not reach/);
+});
+
+test("--llamafile selects a llamafile to start, with its path made absolute", () => {
+  assert.deepEqual(resolveBackend(["--llamafile", "models/m.llamafile"], {}), {
+    kind: "llamafile",
+    path: path.resolve("models/m.llamafile"),
+  });
+});
+
+test("--llamafile needs a path", () => {
+  assert.throws(() => resolveBackend(["--llamafile"], {}), /needs the path/);
+  assert.throws(() => resolveBackend(["--llamafile", "--context", "4096"], {}), /needs the path/);
+});
+
+test("--llamafile can't be combined with --base-url or --model, which would be silently ignored", () => {
+  assert.throws(() => resolveBackend(["--llamafile", "m.llamafile", "--base-url", "http://x"], {}), /can't be combined/);
+  assert.throws(() => resolveBackend(["--llamafile", "m.llamafile", "--model", "m"], {}), /can't be combined/);
+});
+
+test("an exported MITHRIL_BASE_URL does not stop --llamafile from being used for one command", () => {
+  const b = resolveBackend(["--llamafile", "m.llamafile"], { MITHRIL_BASE_URL: "http://x", MITHRIL_MODEL: "m" });
+  assert.equal(b.kind, "llamafile");
+});
+
+test("--port defaults to 8080 and is validated", () => {
+  assert.equal(parsePortFlag([]), 8080);
+  assert.equal(parsePortFlag(["--port", "9001"]), 9001);
+  for (const bad of ["0", "70000", "80.5", "abc"]) {
+    assert.throws(() => parsePortFlag(["--port", bad]), /--port must be/, bad);
+  }
+  assert.throws(() => parsePortFlag(["--port"]), /--port must be/);
+});
+
+test("a bad --port is reported before anything starts, whatever the backend", () => {
+  assert.throws(() => resolveBackend(["--port", "0"], {}), /--port must be/);
+  assert.throws(() => resolveBackend(["--llamafile", "m.llamafile", "--port", "x"], {}), /--port must be/);
+});
+
+test("--port with a remote server is an error: it cannot change where that server listens", () => {
+  assert.throws(
+    () => resolveBackend(["--base-url", "http://localhost:11434", "--model", "m", "--port", "9000"], {}),
+    /--port only applies when Mithril starts the model itself/
+  );
+});
+
+test("--port alone (the picker will start the model) is fine", () => {
+  assert.deepEqual(resolveBackend(["--port", "9000"], {}), { kind: "local" });
 });
